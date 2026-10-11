@@ -4,6 +4,9 @@
 //! Discord принимает картинки только по ссылке, поэтому иконка IDE и значки загрузчиков
 //! лежат в публичном репозитории Forma Mycelium (`assets/discord/`), а иконка мода
 //! берётся из его публичного GitHub-репозитория, если она там есть.
+//!
+//! Тексты активности всегда на английском, какой бы язык ни был выбран в IDE:
+//! их читают друзья в Discord, а не только сам моддер.
 
 mod ipc;
 
@@ -12,7 +15,6 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
-use mycelium_i18n::t;
 use mycelium_project::{Loader, Project};
 use serde_json::{Value, json};
 
@@ -181,25 +183,25 @@ pub fn status(input: &PresenceInput) -> String {
     let kinds: Vec<RunKind> = input.running.iter().map(|(k, _)| *k).collect();
     let has = |k: RunKind| kinds.contains(&k);
     let what = if has(RunKind::Client) && has(RunKind::Server) {
-        t!("discord-status-client-server")
+        "running client & server".to_owned()
     } else if has(RunKind::Client) {
-        t!("discord-status-client")
+        "running the client".to_owned()
     } else if has(RunKind::Server) {
-        t!("discord-status-server")
+        "running the server".to_owned()
     } else if has(RunKind::Data) {
-        t!("discord-status-data")
+        "generating data".to_owned()
     } else if has(RunKind::Build) || has(RunKind::Clean) {
-        t!("discord-status-build")
+        "building the mod".to_owned()
     } else if let Some((_, name)) = input.running.iter().find(|(k, _)| *k == RunKind::Other) {
-        t!("discord-status-task", name = name.clone())
+        format!("running {name}")
     } else if let Some(k) = input.crashed {
-        if matches!(k, RunKind::Build | RunKind::Clean | RunKind::Other) { t!("discord-status-build-failed") } else { t!("discord-status-crash") }
+        if matches!(k, RunKind::Build | RunKind::Clean | RunKind::Other) { "fixing the build 🔧".to_owned() } else { "fixing a crash 💥".to_owned() }
     } else if input.away {
-        t!("discord-status-away")
+        "on a break ☕".to_owned()
     } else {
-        t!("discord-status-code")
+        "writing code".to_owned()
     };
-    t!("discord-status", status = what)
+    format!("Status: {what}")
 }
 
 /// Активность по состоянию IDE.
@@ -208,17 +210,21 @@ pub fn activity(input: &PresenceInput) -> Activity {
     let Some(project) = input.project else {
         return Activity {
             details: "Forma Mycelium".into(),
-            state: t!("discord-no-project"),
+            state: "Picking a project".into(),
             start: Some(input.started_unix),
             large_image: ide_icon,
             large_text: "Forma Mycelium".into(),
-            buttons: vec![(t!("discord-button-ide"), IDE_REPO.into())],
+            buttons: vec![("Forma Mycelium".into(), IDE_REPO.into())],
             ..Activity::default()
         };
     };
     let info = &project.info;
     let name = info.mod_name.clone().or_else(|| info.mod_id.clone()).unwrap_or_else(|| project.name().to_owned());
-    let details = if input.secret { t!("discord-modding-secret") } else { t!("discord-modding", name = name.clone()) };
+    let details = match (&info.mod_name, &info.mod_id) {
+        _ if input.secret => "Mod: a secret project 🤫".to_owned(),
+        (Some(n), Some(id)) if n != id => format!("Mod: {n} ({id})"),
+        _ => format!("Mod: {name}"),
+    };
     // Большая картинка: иконка мода из его репозитория, иначе иконка IDE.
     let links = input.links.filter(|_| !input.secret);
     let (large_image, large_text) = match links.and_then(|l| l.icon.clone()) {
@@ -242,9 +248,9 @@ pub fn activity(input: &PresenceInput) -> Activity {
     });
     let mut buttons = Vec::new();
     if let Some(repo) = links.and_then(|l| l.repo.clone()) {
-        buttons.push((t!("discord-button-mod"), repo));
+        buttons.push(("Mod source".into(), repo));
     }
-    buttons.push((t!("discord-button-ide"), IDE_REPO.into()));
+    buttons.push(("Forma Mycelium".into(), IDE_REPO.into()));
     Activity {
         details,
         state: status(input),
@@ -338,6 +344,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let mut p = Project::open(&root).unwrap();
         p.info.mod_name = Some("Test Mod".into());
+        p.info.mod_id = Some("testmod".into());
         p.info.mod_version = Some("1.0.0".into());
         p.info.minecraft = Some("1.21.1".into());
         p.info.loaders = vec![Loader::NeoForge];
@@ -348,19 +355,18 @@ mod tests {
     #[test]
     fn statuses_combine_client_and_server() {
         let p = project();
-        let st = |key: &str| t!("discord-status", status = t!(key));
         let mut input = PresenceInput { project: Some(&p), running: Vec::new(), crashed: None, started_unix: 10, away: false, secret: false, links: None };
-        assert_eq!(status(&input), st("discord-status-code"));
+        assert_eq!(status(&input), "Status: writing code");
         input.running = vec![(RunKind::Client, "Client".into())];
-        assert_eq!(status(&input), st("discord-status-client"));
+        assert_eq!(status(&input), "Status: running the client");
         input.running.push((RunKind::Server, "Server".into()));
-        assert_eq!(status(&input), st("discord-status-client-server"));
+        assert_eq!(status(&input), "Status: running client & server");
         input.running.clear();
         input.crashed = Some(RunKind::Client);
-        assert_eq!(status(&input), st("discord-status-crash"));
+        assert_eq!(status(&input), "Status: fixing a crash 💥");
 
         let a = activity(&input);
-        assert_eq!(a.details, t!("discord-modding", name = "Test Mod".to_owned()));
+        assert_eq!(a.details, "Mod: Test Mod (testmod)");
         assert!(a.large_image.ends_with("/mycelium.png"), "без иконки мода — иконка IDE");
         assert_eq!(a.small_text.as_deref(), Some("NeoForge 21.1.252 · Minecraft 1.21.1"));
         assert!(a.small_image.as_deref().is_some_and(|s| s.ends_with("/neoforge.png")));

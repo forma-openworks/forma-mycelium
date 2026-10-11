@@ -441,7 +441,7 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
             if let Some(l) = assist.as_deref_mut() {
                 let diag = code_assist::paint_diagnostics(ui, pal, doc, l, &output, gutter, row_h);
                 code_assist::hover(ui, pal, id, doc, l, &output, diag);
-                code_assist::ctrl_click(ui, doc, l, &output);
+                code_assist::ctrl_click(ui, pal, doc, l, &output);
                 code_assist::completion_popup(ui, pal, id, doc, l, &output, has_focus, now);
             }
 

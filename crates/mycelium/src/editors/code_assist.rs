@@ -322,13 +322,98 @@ pub fn hover(ui: &Ui, pal: &Palette, id: Id, doc: &Document, lsp: &mut JavaLsp, 
     });
 }
 
+/// Ключевые слова Java: к ним не перейти, и при Ctrl они не подчёркиваются.
+const JAVA_KEYWORDS: &[&str] = &[
+    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "default", "do", "double", "else",
+    "enum", "extends", "false", "final", "finally", "float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface",
+    "long", "native", "new", "non", "null", "package", "permits", "private", "protected", "public", "record", "return", "sealed", "short",
+    "static", "strictfp", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "true", "try", "var", "void", "volatile",
+    "while", "yield",
+];
+
+/// Стоит ли символ `at` в коде, а не в строке, символьном литерале или комментарии.
+fn in_code(text: &str, at: usize) -> bool {
+    #[derive(PartialEq)]
+    enum St {
+        Code,
+        Line,
+        Block,
+        Str,
+        Char,
+        TextBlock,
+    }
+    let chars: Vec<char> = text.chars().take(at).collect();
+    let mut st = St::Code;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        let triple = c == '"' && next == Some('"') && chars.get(i + 2) == Some(&'"');
+        match st {
+            St::Code if c == '/' && next == Some('/') => st = St::Line,
+            St::Code if c == '/' && next == Some('*') => {
+                st = St::Block;
+                i += 1;
+            }
+            St::Code if triple => {
+                st = St::TextBlock;
+                i += 2;
+            }
+            St::Code if c == '"' => st = St::Str,
+            St::Code if c == '\'' => st = St::Char,
+            St::Line if c == '\n' => st = St::Code,
+            St::Block if c == '*' && next == Some('/') => {
+                st = St::Code;
+                i += 1;
+            }
+            St::Str | St::Char | St::TextBlock if c == '\\' => i += 1,
+            St::Str if c == '"' || c == '\n' => st = St::Code,
+            St::Char if c == '\'' || c == '\n' => st = St::Code,
+            St::TextBlock if triple => {
+                st = St::Code;
+                i += 2;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    st == St::Code
+}
+
+/// Слово под символом `at`, к определению которого можно перейти: имя, а не
+/// ключевое слово, число, строка или комментарий.
+fn navigable_word(text: &str, at: usize) -> Option<(usize, usize)> {
+    let (ws, we) = word_range(text, at);
+    if we == ws {
+        return None;
+    }
+    let word: String = text.chars().skip(ws).take(we - ws).collect();
+    if word.starts_with(|c: char| c.is_ascii_digit()) || JAVA_KEYWORDS.contains(&word.as_str()) || !in_code(text, ws) {
+        return None;
+    }
+    Some((ws, we))
+}
+
 /// Ctrl+щелчок по слову — перейти к определению. Позиция берётся из точки щелчка,
 /// а не из курсора поля ввода: с зажатым Ctrl поле может обработать щелчок по-своему.
-pub fn ctrl_click(ui: &Ui, doc: &Document, lsp: &mut JavaLsp, output: &TextEditOutput) {
+/// Пока Ctrl зажат, слово под указателем подчёркивается пунктиром, как ссылка.
+pub fn ctrl_click(ui: &Ui, pal: &Palette, doc: &Document, lsp: &mut JavaLsp, output: &TextEditOutput) {
     let rect = output.response.response.rect.intersect(ui.clip_rect());
     let (ctrl, hover) = ui.input(|i| (i.modifiers.command, i.pointer.hover_pos()));
-    if ctrl && hover.is_some_and(|p| rect.contains(p)) {
-        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    if let Some(p) = hover.filter(|p| ctrl && rect.contains(*p)) {
+        let at = output.galley.cursor_from_pos(p - output.galley_pos).index.0;
+        if let Some((ws, we)) = navigable_word(&doc.text, at) {
+            let segs = segments(output, ws, we);
+            // Указатель может стоять за концом строки — тогда ближайшее слово не под ним.
+            if segs.iter().any(|s| s.expand2(vec2(0.0, 1.0)).contains(p)) {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                let painter = ui.painter().with_clip_rect(ui.clip_rect());
+                for s in segs {
+                    let y = s.bottom() - 1.0;
+                    painter.extend(Shape::dashed_line(&[Pos2::new(s.left(), y), Pos2::new(s.right(), y)], Stroke::new(1.0, pal.accent), 3.0, 2.0));
+                }
+            }
+        }
     }
     // Модификаторы берём из самого события нажатия: Ctrl мог отпуститься в том же кадре.
     let click = ui.input(|i| {
@@ -369,7 +454,15 @@ pub fn popup_was_open(ctx: &egui::Context, id: Id) -> bool {
 pub fn completion_popup(ui: &Ui, pal: &Palette, id: Id, doc: &mut Document, lsp: &mut JavaLsp, output: &TextEditOutput, has_focus: bool, now: f64) {
     let ctx = ui.ctx().clone();
     let open_key = id.with("completion-open");
-    ctx.data_mut(|d| d.insert_temp(open_key, false));
+    let scrolled_key = id.with("completion-scrolled");
+    let was_open = ctx.data(|d| d.get_temp::<bool>(open_key)).unwrap_or(false);
+    ctx.data_mut(|d| {
+        d.insert_temp(open_key, false);
+        // Список только что открылся: прокрутка от прошлого списка не в счёт.
+        if !was_open {
+            d.remove::<usize>(scrolled_key);
+        }
+    });
     if !has_focus {
         return;
     }
@@ -382,6 +475,11 @@ pub fn completion_popup(ui: &Ui, pal: &Palette, id: Id, doc: &mut Document, lsp:
     ctx.data_mut(|d| d.insert_temp(open_key, true));
     let anchor = output.galley.pos_from_cursor(CCursor::new(c.anchor.min(doc.text.chars().count()))).translate(output.galley_pos.to_vec2());
     let selected = c.selected;
+    // К выбранному пункту прокручиваем, только когда выбор сменился (стрелками или
+    // фильтром) или список только что открылся. Если делать это каждый кадр,
+    // прокрутка колёсиком тут же откатывается обратно.
+    let scroll_to_selected = ctx.data(|d| d.get_temp::<usize>(scrolled_key)) != Some(selected);
+    let mut scrolled = false;
     let loading = c.loading;
     let items: Vec<(usize, CompletionItem)> = list.iter().take(300).map(|&i| (i, c.items[i].clone())).collect();
     let mut clicked: Option<usize> = None;
@@ -415,7 +513,10 @@ pub fn completion_popup(ui: &Ui, pal: &Palette, id: Id, doc: &mut Document, lsp:
                             let is_sel = *i == selected;
                             if is_sel {
                                 ui.painter().rect_filled(rect, CornerRadius::same(5), pal.accent_soft);
-                                resp.scroll_to_me(None);
+                                if scroll_to_selected {
+                                    resp.scroll_to_me(None);
+                                    scrolled = true;
+                                }
                             } else if resp.hovered() {
                                 ui.painter().rect_filled(rect, CornerRadius::same(5), pal.bg_hover);
                             }
@@ -441,6 +542,9 @@ pub fn completion_popup(ui: &Ui, pal: &Palette, id: Id, doc: &mut Document, lsp:
                     }
                 });
         });
+    if scrolled {
+        ctx.data_mut(|d| d.insert_temp(scrolled_key, selected));
+    }
     if let Some(i) = clicked {
         accept_item(&ctx, id, doc, lsp, i, now);
         ctx.memory_mut(|m| m.request_focus(id));
@@ -464,5 +568,25 @@ mod tests {
         let mut s = String::from("пре.fo бар");
         replace_chars(&mut s, 4, 6, "foo()");
         assert_eq!(s, "пре.foo() бар");
+    }
+
+    #[test]
+    fn ctrl_underlines_only_names_in_code() {
+        let src = "public class Ruby extends Block { // Item\n  String s = \"Item\"; /* Block */ int n = 42; char c = '\"'; Foo f;\n  String t = \"\"\"\n   Bar\n  \"\"\"; Baz b; }";
+        let word_at = |needle: &str, nth: usize| {
+            let byte = src.match_indices(needle).nth(nth).unwrap().0;
+            let at = src[..byte].chars().count() + 1;
+            navigable_word(src, at).map(|(a, b)| src.chars().skip(a).take(b - a).collect::<String>())
+        };
+        assert_eq!(word_at("Ruby", 0).as_deref(), Some("Ruby"));
+        assert_eq!(word_at("Block", 0).as_deref(), Some("Block"));
+        assert_eq!(word_at("public", 0), None, "ключевое слово");
+        assert_eq!(word_at("Item", 0), None, "в однострочном комментарии");
+        assert_eq!(word_at("Item", 1), None, "в строке");
+        assert_eq!(word_at("Block", 1), None, "в блочном комментарии");
+        assert_eq!(word_at("42", 0), None, "число");
+        assert_eq!(word_at("Foo", 0).as_deref(), Some("Foo"), "кавычка в символьном литерале не открывает строку");
+        assert_eq!(word_at("Bar", 0), None, "в текстовом блоке");
+        assert_eq!(word_at("Baz", 0).as_deref(), Some("Baz"));
     }
 }
