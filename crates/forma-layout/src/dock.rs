@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{
-    Align2, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Key, KeyboardShortcut, Modifiers, Pos2, Rect,
+    Align2, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, KeyboardShortcut, Pos2, Rect,
     Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId, pos2, vec2,
 };
-use mycelium_i18n::t;
+use forma_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::tree::{Area, AreaId, Node, SplitDir, Surface, Zone};
@@ -29,13 +29,6 @@ const RADIUS: u8 = 8;
 const MIN_AREA: f32 = 72.0;
 /// Размер нового отдельного окна, если размер исходной области неизвестен.
 const DEFAULT_WINDOW: Vec2 = vec2(720.0, 480.0);
-
-/// Сочетание «развернуть область», как «спрятать все панели» в IDEA. `Ctrl+Space` из Blender
-/// в IDE отдан подсказкам, а `Ctrl+Alt+Space` Windows перехватывает (Alt+Space — меню окна).
-pub const MAXIMIZE_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::SHIFT), Key::F12);
-
-/// Подпись сочетания в меню.
-pub const MAXIMIZE_SHORTCUT_TEXT: &str = "Ctrl+Shift+F12";
 
 /// Что приложение рассказывает о своих вкладках и как рисует их содержимое.
 pub trait TabViewer {
@@ -63,6 +56,10 @@ pub trait TabViewer {
 
     /// Вкладку закрыли.
     fn on_close(&mut self, _tab: Self::Tab) {}
+
+    /// Начало кадра отдельного окна ОС: у него свой ввод, и общие сочетания клавиш
+    /// программа ловит здесь (в главном окне она делает это сама).
+    fn window_input(&mut self, _ui: &mut Ui) {}
 }
 
 /// Цвета и оформление, которые задаёт приложение.
@@ -86,6 +83,11 @@ pub struct DockStyle {
     pub icon: Option<Arc<egui::IconData>>,
     /// Название программы — в заголовках отдельных окон.
     pub app_title: String,
+    /// Сочетания «развернуть область» из раскладки клавиш программы. Их ловит сама
+    /// раскладка: разворачивается область под курсором, а не только последняя.
+    pub maximize_keys: Vec<KeyboardShortcut>,
+    /// Подпись сочетания в меню.
+    pub maximize_text: String,
 }
 
 /// Какое окно: главное или одно из отдельных.
@@ -624,6 +626,9 @@ struct Frame0 {
 impl<T> DockState<T> {
     fn show_surface(&mut self, ui: &mut Ui, key: SurfaceKey, surface: &mut Surface<T>, viewer: &mut impl TabViewer<Tab = T>, style: &DockStyle) {
         let ctx = ui.ctx().clone();
+        if matches!(key, SurfaceKey::Window(_)) {
+            viewer.window_input(ui);
+        }
         let full = ui.available_rect_before_wrap();
         let rect = full.shrink(GAP);
         let mut frame = Frame0 { key, areas: Vec::new() };
@@ -643,7 +648,7 @@ impl<T> DockState<T> {
         }
 
         // Сочетание разворачивает область под курсором (или последнюю, с которой работали).
-        if ui.input_mut(|i| i.consume_shortcut(&MAXIMIZE_SHORTCUT)) {
+        if style.maximize_keys.iter().any(|k| ui.input_mut(|i| i.consume_shortcut(k))) {
             let hovered = ui.input(|i| i.pointer.hover_pos()).and_then(|p| frame.areas.iter().find(|a| a.header.union(a.body).contains(p)).map(|a| a.id));
             let area = surface.maximized.or(hovered).or_else(|| self.focused(key).filter(|id| surface.contains(*id))).or_else(|| surface.first_area_id());
             if let Some(area) = area {
@@ -801,7 +806,7 @@ impl<T> DockState<T> {
         }
         let menu = icon_button(ui, menu_rect, Id::new(("mycelium-dock-menu", area.id)), "⋯", style).on_hover_text(t!("dock-area-menu"));
         egui::Popup::menu(&menu).style(style.menu_style).show(|ui| {
-            self.area_menu(ui, key, area, maximized);
+            self.area_menu(ui, key, area, maximized, style);
         });
 
         // Вкладки.
@@ -851,7 +856,7 @@ impl<T> DockState<T> {
                 self.rt.focused.insert(key, area.id);
             }
             egui::Popup::context_menu(&resp).style(style.menu_style).show(|ui| {
-                self.tab_menu(ui, key, area, i, maximized);
+                self.tab_menu(ui, key, area, i, maximized, style);
             });
         }
 
@@ -870,7 +875,7 @@ impl<T> DockState<T> {
         frame.areas.push(AreaRects { id: area.id, header, body, tabs: tab_rects });
     }
 
-    fn area_menu(&mut self, ui: &mut Ui, key: SurfaceKey, area: &Area<T>, maximized: bool) {
+    fn area_menu(&mut self, ui: &mut Ui, key: SurfaceKey, area: &Area<T>, maximized: bool, style: &DockStyle) {
         let id = area.id;
         if ui.button(t!("dock-split-right")).clicked() {
             self.rt.ops.push(Op::SplitDuplicate { key, area: id, zone: Zone::Right });
@@ -880,7 +885,7 @@ impl<T> DockState<T> {
         }
         ui.separator();
         let max_label = if maximized { t!("dock-restore") } else { t!("dock-maximize") };
-        if ui.add(egui::Button::new(max_label).shortcut_text(MAXIMIZE_SHORTCUT_TEXT)).clicked() {
+        if ui.add(egui::Button::new(max_label).shortcut_text(style.maximize_text.as_str())).clicked() {
             self.rt.ops.push(Op::ToggleMaximize { key, area: id });
         }
         match key {
@@ -902,7 +907,7 @@ impl<T> DockState<T> {
         }
     }
 
-    fn tab_menu(&mut self, ui: &mut Ui, key: SurfaceKey, area: &Area<T>, index: usize, maximized: bool) {
+    fn tab_menu(&mut self, ui: &mut Ui, key: SurfaceKey, area: &Area<T>, index: usize, maximized: bool, style: &DockStyle) {
         let id = area.id;
         if ui.button(t!("dock-close")).clicked() {
             self.rt.ops.push(Op::Close { key, area: id, index });
@@ -933,7 +938,7 @@ impl<T> DockState<T> {
             }
         }
         let max_label = if maximized { t!("dock-restore") } else { t!("dock-maximize") };
-        if ui.add(egui::Button::new(max_label).shortcut_text(MAXIMIZE_SHORTCUT_TEXT)).clicked() {
+        if ui.add(egui::Button::new(max_label).shortcut_text(style.maximize_text.as_str())).clicked() {
             self.rt.ops.push(Op::ToggleMaximize { key, area: id });
         }
     }

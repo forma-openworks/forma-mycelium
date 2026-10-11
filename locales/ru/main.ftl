@@ -61,24 +61,6 @@ welcome-recent = Недавние проекты
 
 ## Настройки
 
-settings-title = Настройки
-settings-language = Язык интерфейса
-settings-language-system = Как в системе
-settings-theme = Тема
-settings-accent = Акцентный цвет
-settings-font-size = Размер текста
-settings-locales-hint = Свои переводы можно положить в { $path } (папка языка с файлами .ftl) — они подхватятся при следующем запуске.
-theme-dark = Тёмная
-theme-light = Светлая
-view-zoom-hint = Масштаб: Ctrl+= / Ctrl+- / Ctrl+0
-
-accent-violet = Фиолетовый
-accent-blue = Синий
-accent-teal = Бирюзовый
-accent-green = Зелёный
-accent-amber = Янтарный
-accent-rose = Розовый
-
 ## О программе
 
 about-version = Версия { $version }
@@ -122,3 +104,32 @@ status-lsp-hint = Подсказки Java (jdtls): ошибки и предуп�
 settings-discord = Показывать в Discord, над каким модом я работаю
 settings-discord-secret = Секретный проект: скрыть название этого мода
 settings-discord-secret-hint = Вместо названия — «секретный проект», без иконки мода и ссылки на его репозиторий.
+
+settings-page-discord = Discord
+settings-discord-secret-no-project = Откройте проект, чтобы скрыть его название.
+settings-component-appearance = Язык, тема, акцентный цвет, размер текста, масштаб
+settings-component-keymap = Ваши изменения сочетаний клавиш
+settings-component-discord = Активность в Discord
+
+menu-manage-settings = Управление настройками
+action-export-settings = Экспорт настроек…
+action-import-settings = Импорт настроек…
+action-find-action = Найти действие…
+action-sync-gradle = Синхронизировать с Gradle
+action-run = Запустить выбранную конфигурацию
+action-zoom-in = Увеличить масштаб
+action-zoom-out = Уменьшить масштаб
+action-zoom-reset = Сбросить масштаб
+action-show-project = Окно «Проект»
+action-show-console = Окно «Консоль»
+action-show-exceptions = Окно «Исключения»
+action-completion = Автодополнение
+action-goto-definition = Перейти к определению
+
+action-group-file = Файл
+action-group-project = Проект
+action-group-run = Запуск
+action-group-view = Вид
+action-group-window = Окно
+action-group-editor = Редактор кода
+action-group-help = Справка

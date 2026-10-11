@@ -11,8 +11,11 @@ name = "forma-mycelium"
 path = "src/main.rs"
 
 [dependencies]
-mycelium-i18n.workspace = true
-mycelium-layout.workspace = true
+forma-i18n.workspace = true
+forma-layout.workspace = true
+forma-ui.workspace = true
+forma-actions.workspace = true
+forma-settings.workspace = true
 mycelium-project.workspace = true
 mycelium-log.workspace = true
 eframe.workspace = true

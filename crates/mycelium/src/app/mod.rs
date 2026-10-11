@@ -7,34 +7,41 @@
 
 mod chrome;
 mod run_configs;
+mod settings_dialog;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
-use eframe::egui::{self, Frame, Key, KeyboardShortcut, Modifiers, Ui};
-use mycelium_i18n::t;
-use mycelium_layout::{DockStyle, Surface, SurfaceKey};
+use eframe::egui::{self, Frame, Ui};
+use forma_actions::{Context as ActionContext, Registry, Shortcut};
+use forma_i18n::t;
+use forma_layout::{DockStyle, Surface, SurfaceKey};
+use forma_settings::Store;
+use forma_ui::appearance::ZOOM_RANGE;
+use forma_ui::find_action::FindAction;
 use mycelium_project::{Project, store};
 
 use crate::editors::{Documents, EditorKind, EditorStates, EditorTab, Editors, ProjectTree};
 use crate::run::{self, Console, RunConfig, RunsFile};
 use run_configs::RunConfigsEditor;
+use settings_dialog::{ExportDialog, ImportDialog, SettingsDialog};
+use crate::actions;
 use crate::settings::{self, Settings};
 use crate::discord::{self, ModLinks, PresenceInput, Presence};
 use crate::lsp::{JavaLsp, LspEvent, LspStatus};
 use crate::sync::{GradleSync, SyncResult};
-use crate::theme::{self, Accent, Palette, ThemeKind};
+use forma_ui::theme::{self, Accent, Palette, ThemeKind};
 use crate::workspace::{self, Builtin, Layout, ViewState, Workspace};
 
 pub const APP_TITLE: &str = "Forma Mycelium";
 
-const SETTINGS_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::ALT), Key::S);
-const SAVE_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
-/// Как в IDEA: Shift+F10 — запустить, Ctrl+F2 — остановить.
-const RUN_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::F10);
-const STOP_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F2);
+/// Иконка окна и панели задач (сама картинка рисуется в `icon.rs`).
+pub fn app_icon() -> egui::IconData {
+    let size = 256;
+    egui::IconData { rgba: crate::icon::rgba(size), width: size, height: size }
+}
 
 /// Действия, которые копятся за кадр и выполняются в его конце.
 pub enum Cmd {
@@ -86,12 +93,57 @@ pub enum Cmd {
     ReturnAllWindows,
     ToggleMaximize,
     Settings,
+    /// Открыть настройки на странице.
+    OpenSettingsPage(String),
+    ExportSettings,
+    ImportSettings,
+    FindAction,
+    /// Выполнить действие по id (из «Найти действие» или отдельного окна).
+    Action(String),
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     About,
     Quit,
 }
 
+/// Команда, которую выполняет общее действие. У действий редактора команды нет:
+/// их сочетания ловит сам редактор.
+pub fn action_cmd(id: &str) -> Option<Cmd> {
+    use actions::*;
+    Some(match id {
+        OPEN_PROJECT => Cmd::OpenProjectDialog,
+        CLOSE_PROJECT => Cmd::CloseProject,
+        SAVE_ALL => Cmd::SaveAll,
+        SETTINGS => Cmd::Settings,
+        EXPORT_SETTINGS => Cmd::ExportSettings,
+        IMPORT_SETTINGS => Cmd::ImportSettings,
+        QUIT => Cmd::Quit,
+        SYNC_GRADLE => Cmd::SyncGradle,
+        RUN => Cmd::Run,
+        STOP => Cmd::Stop,
+        STOP_ALL => Cmd::StopAll,
+        EDIT_RUN_CONFIGS => Cmd::EditRunConfigs,
+        ZOOM_IN => Cmd::ZoomIn,
+        ZOOM_OUT => Cmd::ZoomOut,
+        ZOOM_RESET => Cmd::ZoomReset,
+        SHOW_PROJECT => Cmd::OpenEditor(EditorKind::Project),
+        SHOW_CONSOLE => Cmd::OpenEditor(EditorKind::Console),
+        SHOW_EXCEPTIONS => Cmd::OpenEditor(EditorKind::Exceptions),
+        MAXIMIZE => Cmd::ToggleMaximize,
+        DETACH => Cmd::DetachFocused,
+        RETURN_WINDOWS => Cmd::ReturnAllWindows,
+        FIND_ACTION => Cmd::FindAction,
+        ABOUT => Cmd::About,
+        _ => return None,
+    })
+}
+
 enum Modal {
-    Settings,
+    Settings(Box<SettingsDialog>),
+    FindAction(FindAction),
+    Export(ExportDialog),
+    Import(Box<ImportDialog>),
     About,
     Rename { index: usize, name: String },
     RunConfigs(Box<RunConfigsEditor>),
@@ -107,8 +159,14 @@ pub struct MyceliumApp {
     /// Контекст egui — фоновые задачи будят им интерфейс.
     ctx: egui::Context,
     settings: Settings,
+    /// Файлы компонентов настроек (`options/*.json`).
+    store: Store,
+    /// Все действия программы — для раскладки клавиш, меню и «Найти действие».
+    actions: Registry,
+    /// Последняя открытая страница настроек.
+    settings_page: String,
     pal: Palette,
-    style_key: Option<(ThemeKind, Accent, u32)>,
+    style_key: Option<(ThemeKind, Accent, u32, Vec<Shortcut>)>,
     icon: Arc<egui::IconData>,
     dock_style: DockStyle,
     layout: Layout,
@@ -166,14 +224,21 @@ fn default_layout() -> Layout {
 }
 
 impl MyceliumApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, project_arg: Option<PathBuf>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, store: Store, project_arg: Option<PathBuf>) -> Self {
         let ctx = &cc.egui_ctx;
-        crate::fonts::install(ctx);
+        forma_ui::fonts::install(ctx);
         crate::highlight::warm_up();
-        ctx.set_zoom_factor(settings.zoom.clamp(0.5, 3.0));
-        let pal = Palette::new(settings.theme, settings.accent);
-        let icon = Arc::new(theme::app_icon());
-        let dock_style = pal.dock_style(APP_TITLE, icon.clone());
+        // Масштаб и выход — действия из раскладки клавиш, а не встроенные сочетания egui:
+        // иначе случайное Ctrl+Q молча закрывало бы программу.
+        ctx.options_mut(|o| {
+            o.zoom_with_keyboard = false;
+            o.quit_shortcuts.clear();
+        });
+        ctx.set_zoom_factor(settings.appearance.zoom.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
+        let pal = Palette::new(settings.appearance.theme, settings.appearance.accent);
+        let icon = Arc::new(app_icon());
+        let actions = actions::registry();
+        let dock_style = pal.dock_style(APP_TITLE, icon.clone(), Vec::new(), String::new());
         let gpu_info = cc
             .wgpu_render_state
             .as_ref()
@@ -187,6 +252,9 @@ impl MyceliumApp {
         let mut app = Self {
             ctx: ctx.clone(),
             settings,
+            store,
+            actions,
+            settings_page: forma_ui::appearance::PAGE.to_owned(),
             pal,
             style_key: None,
             icon,
@@ -219,7 +287,7 @@ impl MyceliumApp {
             mark: None,
         };
         // Как в IDEA: при запуске снова открывается последний проект.
-        let path = project_arg.or_else(|| app.settings.last_project.clone().filter(|p| p.is_dir()));
+        let path = project_arg.or_else(|| app.settings.recent.last.clone().filter(|p| p.is_dir()));
         if let Some(path) = path {
             app.open_project(path, 0.0);
         }
@@ -244,7 +312,7 @@ impl MyceliumApp {
 
     /// Сохраняет настройки, файлы и раскладку текущего проекта.
     fn persist(&mut self) {
-        self.settings.save();
+        self.settings.save(&mut self.store);
         for err in self.docs.save_all() {
             log::warn!("{err}");
         }
@@ -266,9 +334,9 @@ impl MyceliumApp {
         let project = match Project::open(&path) {
             Ok(p) => p,
             Err(_) => {
-                self.settings.recent_projects.retain(|p| p != &path);
-                if self.settings.last_project.as_ref() == Some(&path) {
-                    self.settings.last_project = None;
+                self.settings.recent.projects.retain(|p| p != &path);
+                if self.settings.recent.last.as_ref() == Some(&path) {
+                    self.settings.recent.last = None;
                 }
                 self.toast(t!("toast-project-missing", path = path.display().to_string()), true, now);
                 return;
@@ -304,7 +372,7 @@ impl MyceliumApp {
         if !self.configs.iter().any(|c| Some(&c.id) == self.view.run_config.as_ref()) {
             self.view.run_config = self.configs.first().map(|c| c.id.clone());
         }
-        self.settings.remember_project(&project.root);
+        self.settings.recent.remember(&project.root);
         if project.created {
             self.toast(t!("toast-project-initialized"), false, now);
         }
@@ -328,7 +396,7 @@ impl MyceliumApp {
         self.opened_unix = run::unix_now();
         self.console = Console::default();
         self.states = EditorStates::default();
-        self.settings.last_project = None;
+        self.settings.recent.last = None;
         let (layout, view) = global_layout_path().and_then(|p| workspace::read_layout(&p)).unwrap_or_else(|| (default_layout(), ViewState::default()));
         self.layout = layout;
         self.view = view;
@@ -365,7 +433,7 @@ impl MyceliumApp {
     fn place_tab(&mut self, file: PathBuf, entry: Option<String>) {
         // 1. Вкладка с этим файлом уже есть — показываем её.
         let active = self.layout.active;
-        let mut found: Option<(SurfaceKey, mycelium_layout::AreaId)> = None;
+        let mut found: Option<(SurfaceKey, forma_layout::AreaId)> = None;
         {
             let mut check = |key: SurfaceKey, s: &mut Surface<EditorTab>| {
                 if found.is_some() {
@@ -392,7 +460,7 @@ impl MyceliumApp {
 
         // 2. Пустая вкладка «Код» или область с кодом в главном окне.
         let surface = &mut self.layout.workspaces[active].surface;
-        let mut placed: Option<mycelium_layout::AreaId> = None;
+        let mut placed: Option<forma_layout::AreaId> = None;
         surface.for_each_area_mut(|a| {
             if placed.is_none() {
                 if let Some(i) = a.tabs.iter().position(|t| t.kind == EditorKind::Code && t.file.is_none()) {
@@ -432,7 +500,7 @@ impl MyceliumApp {
     }
 
     /// Делает область текущей и видимой: если развёрнута другая область, раскладка возвращается.
-    fn reveal_area(&mut self, key: SurfaceKey, area: mycelium_layout::AreaId) {
+    fn reveal_area(&mut self, key: SurfaceKey, area: forma_layout::AreaId) {
         self.layout.dock.focus(key, area);
         let surface = match key {
             SurfaceKey::Main => Some(&mut self.layout.workspaces[self.layout.active].surface),
@@ -532,11 +600,18 @@ impl MyceliumApp {
 
     fn process_cmds(&mut self, ctx: &egui::Context) {
         let now = Self::now(ctx);
+        // Команда может породить новую (`Action` → команда действия), поэтому — до пустой очереди.
+        while !self.cmds.is_empty() {
+            self.process_batch(ctx, now);
+        }
+    }
+
+    fn process_batch(&mut self, ctx: &egui::Context, now: f64) {
         for cmd in std::mem::take(&mut self.cmds) {
             match cmd {
                 Cmd::OpenProjectDialog => {
                     let mut dialog = rfd::FileDialog::new().set_title(t!("dialog-open-project"));
-                    if let Some(dir) = self.settings.recent_projects.first().and_then(|p| p.parent()) {
+                    if let Some(dir) = self.settings.recent.projects.first().and_then(|p| p.parent()) {
                         dialog = dialog.set_directory(dir);
                     }
                     if let Some(dir) = dialog.pick_folder() {
@@ -676,7 +751,19 @@ impl MyceliumApp {
                 Cmd::DetachFocused => self.layout.dock.detach_focused(&self.layout.workspaces[self.layout.active].surface),
                 Cmd::ReturnAllWindows => self.layout.dock.return_all(),
                 Cmd::ToggleMaximize => self.layout.dock.toggle_maximize_focused(&self.layout.workspaces[self.layout.active].surface),
-                Cmd::Settings => self.modal = Some(Modal::Settings),
+                Cmd::Settings => self.open_settings(None),
+                Cmd::OpenSettingsPage(page) => self.open_settings(Some(page)),
+                Cmd::ExportSettings => self.modal = Some(Modal::Export(ExportDialog::new())),
+                Cmd::ImportSettings => self.import_settings(now),
+                Cmd::FindAction => self.modal = Some(Modal::FindAction(FindAction::default())),
+                Cmd::Action(id) => {
+                    if let Some(cmd) = action_cmd(&id) {
+                        self.cmds.push(cmd);
+                    }
+                }
+                Cmd::ZoomIn => self.set_zoom(ctx, self.settings.appearance.zoom + 0.1),
+                Cmd::ZoomOut => self.set_zoom(ctx, self.settings.appearance.zoom - 0.1),
+                Cmd::ZoomReset => self.set_zoom(ctx, 1.0),
                 Cmd::About => self.modal = Some(Modal::About),
                 Cmd::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             }
@@ -726,27 +813,36 @@ impl MyceliumApp {
         ws
     }
 
+    /// Общие сочетания клавиш главного окна. Пока открыт диалог, они не работают,
+    /// как в JetBrains: иначе, например, запись сочетания в настройках запускала бы его.
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        if ctx.input_mut(|i| i.consume_shortcut(&SETTINGS_SHORTCUT)) {
-            self.modal = Some(Modal::Settings);
+        if self.modal.is_some() {
+            return;
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&SAVE_SHORTCUT)) {
-            self.cmds.push(Cmd::SaveAll);
-        }
-        if ctx.input_mut(|i| i.consume_shortcut(&RUN_SHORTCUT)) {
-            self.cmds.push(Cmd::Run);
-        }
-        if ctx.input_mut(|i| i.consume_shortcut(&STOP_SHORTCUT)) {
-            self.cmds.push(Cmd::Stop);
-        }
+        let fired = ctx.input_mut(|i| forma_actions::triggered(i, &self.actions, &self.settings.keymap, ActionContext::Global));
+        self.cmds.extend(fired.iter().filter_map(|id| action_cmd(id)));
+    }
+
+    fn set_zoom(&mut self, ctx: &egui::Context, zoom: f32) {
+        let zoom = ((zoom * 10.0).round() / 10.0).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
+        self.settings.appearance.zoom = zoom;
+        ctx.set_zoom_factor(zoom);
+    }
+
+    /// Текст сочетания действия для меню.
+    pub(super) fn keys(&self, id: &str) -> String {
+        self.settings.keymap.text(&self.actions, id)
     }
 
     fn apply_style(&mut self, ctx: &egui::Context) {
-        let key = (self.settings.theme, self.settings.accent, self.settings.font_size.to_bits());
-        if self.style_key != Some(key) {
-            self.pal = Palette::new(self.settings.theme, self.settings.accent);
-            self.dock_style = self.pal.dock_style(APP_TITLE, self.icon.clone());
-            theme::apply(ctx, &self.pal, self.settings.font_size);
+        let a = &self.settings.appearance;
+        let max_keys = self.settings.keymap.shortcuts(&self.actions, actions::MAXIMIZE).to_vec();
+        let key = (a.theme, a.accent, a.font_size.to_bits(), max_keys);
+        if self.style_key.as_ref() != Some(&key) {
+            self.pal = Palette::new(a.theme, a.accent);
+            let text = key.3.first().map(ToString::to_string).unwrap_or_default();
+            self.dock_style = self.pal.dock_style(APP_TITLE, self.icon.clone(), key.3.iter().map(Shortcut::to_egui).collect(), text);
+            theme::apply(ctx, &self.pal, a.font_size);
             self.style_key = Some(key);
         }
     }
@@ -810,7 +906,7 @@ impl MyceliumApp {
                 self.links_rx = None;
             }
         }
-        if !self.settings.discord_presence {
+        if !self.settings.discord.enabled {
             self.presence.set(None);
             return;
         }
@@ -884,7 +980,10 @@ impl MyceliumApp {
             pal: &self.pal,
             project: self.project.as_ref(),
             tree: &mut self.tree,
-            recent: &self.settings.recent_projects,
+            recent: &self.settings.recent.projects,
+            actions: &self.actions,
+            keymap: &self.settings.keymap,
+            shortcuts: self.modal.is_none(),
             next_tab_id: &mut self.layout.next_tab_id,
             cmds: &mut self.cmds,
             docs: &mut self.docs,
@@ -894,7 +993,7 @@ impl MyceliumApp {
             configs: &self.configs,
             run_config: &mut self.view.run_config,
             states: &mut self.states,
-            font_size: self.settings.font_size,
+            font_size: self.settings.appearance.font_size,
             now,
         };
         let dock = &mut self.layout.dock;
@@ -913,7 +1012,6 @@ impl eframe::App for MyceliumApp {
         let now = Self::now(&ctx);
         self.apply_style(&ctx);
         self.handle_keys(&ctx);
-        self.settings.zoom = ctx.zoom_factor();
         if self.layout.active >= self.layout.workspaces.len() {
             self.layout.active = 0;
         }

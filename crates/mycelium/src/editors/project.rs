@@ -7,14 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, CursorIcon, FontId, RichText, Sense, Ui, pos2, vec2};
-use mycelium_i18n::t;
+use forma_i18n::t;
 use mycelium_project::libraries::{GroupKind, Node, Part};
 use mycelium_project::{Libraries, Origin, Project, store};
 
 use super::problem_ui::{chip, origin_color};
 use crate::app::Cmd;
 use crate::sync::SyncState;
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 const ROW_H: f32 = 22.0;
 const INDENT: f32 = 14.0;
@@ -98,7 +98,7 @@ impl ProjectTree {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            ui.label(RichText::new(project.name()).family(crate::fonts::semibold()).color(pal.heading))
+            ui.label(RichText::new(project.name()).family(forma_ui::fonts::semibold()).color(pal.heading))
                 .on_hover_text(project.root.display().to_string());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(6.0);
@@ -158,7 +158,7 @@ impl ProjectTree {
         if header.clicked() {
             self.libs_open = !self.libs_open;
         }
-        crate::theme::context_menu(&header, |ui| {
+        forma_ui::theme::context_menu(&header, |ui| {
             if ui.button(t!("libs-sync")).clicked() {
                 cmds.push(Cmd::SyncGradle);
             }
@@ -224,7 +224,7 @@ impl ProjectTree {
         if let Some(jdk) = &libs.jdk {
             let resp = tree_row(ui, pal, 1, None, "☕", origin_color(pal, &Origin::Java), &format!("JDK {}", jdk.version), pal.text, None, false);
             let resp = resp.on_hover_text(jdk.home.display().to_string());
-            crate::theme::context_menu(&resp, |ui| {
+            forma_ui::theme::context_menu(&resp, |ui| {
                 if ui.button(t!("project-reveal")).clicked() {
                     cmds.push(Cmd::Reveal(jdk.home.clone()));
                 }
@@ -248,7 +248,7 @@ impl ProjectTree {
         if resp.clicked() {
             toggle(&mut self.lib_open, &key);
         }
-        crate::theme::context_menu(&resp, |ui| {
+        forma_ui::theme::context_menu(&resp, |ui| {
             if ui.button(t!("project-reveal")).clicked() {
                 cmds.push(Cmd::Reveal(l.jar.clone()));
             }
@@ -290,7 +290,7 @@ impl ProjectTree {
             if resp.double_clicked() {
                 cmds.push(Cmd::OpenLibraryEntry { lib: node.lib, entry: node.path.clone() });
             }
-            crate::theme::context_menu(&resp, |ui| {
+            forma_ui::theme::context_menu(&resp, |ui| {
                 if ui.button(t!("project-open")).clicked() {
                     cmds.push(Cmd::OpenLibraryEntry { lib: node.lib, entry: node.path.clone() });
                 }
@@ -326,7 +326,7 @@ impl ProjectTree {
             if resp.double_clicked() && !entry.dir {
                 cmds.push(Cmd::OpenFile { path: entry.path.clone(), line: None });
             }
-            crate::theme::context_menu(&resp, |ui| {
+            forma_ui::theme::context_menu(&resp, |ui| {
                 if !entry.dir && ui.button(t!("project-open")).clicked() {
                     cmds.push(Cmd::OpenFile { path: entry.path.clone(), line: None });
                 }

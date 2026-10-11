@@ -1,6 +1,6 @@
 [package]
-name = "mycelium-i18n"
-description = "Локализация интерфейса Forma Mycelium на Fluent"
+name = "forma-i18n"
+description = "Платформа Forma: локализация интерфейса на Fluent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -7,11 +7,12 @@ use eframe::egui::{
     text_edit::TextEditOutput,
     vec2,
 };
-use mycelium_i18n::t;
+use forma_i18n::t;
 
 use super::code::Document;
+use crate::actions;
 use crate::lsp::{self, Completion, CompletionItem, JavaLsp, Severity};
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 /// Сколько вариантов показывать в списке без прокрутки.
 const VISIBLE_ITEMS: usize = 10;
@@ -104,14 +105,15 @@ fn typed_part(doc: &Document, c: &Completion, cursor: usize) -> String {
     doc.text.chars().skip(c.anchor).take(cursor.saturating_sub(c.anchor)).collect()
 }
 
-/// Клавиши до того, как их увидит поле ввода: стрелки и Enter в списке, Ctrl+Space, F12.
+/// Клавиши до того, как их увидит поле ввода: стрелки и Enter в списке, автодополнение
+/// и переход к определению (их сочетания — из раскладки клавиш).
 /// Возвращает `true`, если Enter или Tab уже обработаны.
-pub fn handle_keys(ctx: &egui::Context, id: Id, doc: &mut Document, lsp: &mut JavaLsp, now: f64) -> bool {
+pub fn handle_keys(ctx: &egui::Context, id: Id, doc: &mut Document, lsp: &mut JavaLsp, keys: super::Keys, now: f64) -> bool {
     let cursor = cursor_of(ctx, id).unwrap_or(0);
-    if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Space)) {
+    if ctx.input_mut(|i| forma_actions::consume(i, keys.actions, keys.keymap, actions::COMPLETION)) {
         lsp.request_completion(doc, cursor, word_start(&doc.text, cursor));
     }
-    let definition = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F12) || i.consume_key(Modifiers::CTRL, Key::B));
+    let definition = ctx.input_mut(|i| forma_actions::consume(i, keys.actions, keys.keymap, actions::GOTO_DEFINITION));
     if definition {
         lsp.request_definition(doc, cursor);
     }
@@ -290,8 +292,9 @@ pub fn paint_diagnostics(ui: &Ui, pal: &Palette, doc: &Document, lsp: &JavaLsp, 
 pub fn hover(ui: &Ui, pal: &Palette, id: Id, doc: &Document, lsp: &mut JavaLsp, output: &TextEditOutput, diag: Option<(Severity, String)>) {
     let ctx = ui.ctx().clone();
     let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) else { return };
-    let text_rect = output.response.response.rect;
-    if !text_rect.contains(pointer) || !ui.clip_rect().contains(pointer) || ui.input(|i| i.pointer.any_down()) {
+    // `contains_pointer` учитывает слои: под диалогом или всплывающим окном редактор
+    // указателя «не видит», и подсказка не просвечивает сквозь них.
+    if !output.response.response.contains_pointer() || !ui.clip_rect().contains(pointer) || ui.input(|i| i.pointer.any_down()) {
         return;
     }
     let ci = output.galley.cursor_from_pos(pointer - output.galley_pos).index.0;
@@ -399,6 +402,10 @@ fn navigable_word(text: &str, at: usize) -> Option<(usize, usize)> {
 /// Пока Ctrl зажат, слово под указателем подчёркивается пунктиром, как ссылка.
 pub fn ctrl_click(ui: &Ui, pal: &Palette, doc: &Document, lsp: &mut JavaLsp, output: &TextEditOutput) {
     let rect = output.response.response.rect.intersect(ui.clip_rect());
+    // Под диалогом или всплывающим окном редактор не реагирует ни на наведение, ни на щелчок.
+    if !output.response.response.contains_pointer() {
+        return;
+    }
     let (ctrl, hover) = ui.input(|i| (i.modifiers.command, i.pointer.hover_pos()));
     if let Some(p) = hover.filter(|p| ctrl && rect.contains(*p)) {
         let at = output.galley.cursor_from_pos(p - output.galley_pos).index.0;

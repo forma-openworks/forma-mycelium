@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use mycelium_i18n::t;
-use mycelium_layout::{AreaId, DockState, Node, SplitDir, Surface};
+use forma_i18n::t;
+use forma_layout::{AreaId, DockState, Node, SplitDir, Surface};
 use serde::{Deserialize, Serialize};
 
 use crate::editors::{EditorKind, EditorTab};
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn layout_file_roundtrip_with_view() {
-        let dir = std::env::temp_dir().join(format!("mycelium-layout-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("forma-layout-{}", std::process::id()));
         let path = dir.join("workspace.json");
         let layout = Layout::factory();
         let view = ViewState { expanded: vec!["src/main".into()], show_hidden: true, run_config: Some("client".into()), libs_open: true, discord_secret: false };

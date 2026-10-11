@@ -14,7 +14,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mycelium_i18n::t;
+use forma_i18n::t;
 use mycelium_log::{Entry, Parser, ProblemStore};
 use mycelium_project::{GradleModel, Loader, ModInfo, OriginRules, store};
 use serde::{Deserialize, Serialize};

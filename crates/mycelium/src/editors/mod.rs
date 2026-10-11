@@ -12,8 +12,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, Id, RichText, Ui};
-use mycelium_i18n::t;
-use mycelium_layout::TabViewer;
+use forma_actions::{Context as ActionContext, Keymap, Registry};
+use forma_i18n::t;
+use forma_layout::TabViewer;
 use mycelium_project::Project;
 use serde::{Deserialize, Serialize};
 
@@ -24,8 +25,8 @@ use crate::app::Cmd;
 use crate::run::{Console, RunConfig};
 use crate::lsp::JavaLsp;
 use crate::sync::SyncState;
-use crate::theme::Palette;
-use crate::widgets;
+use forma_ui::theme::Palette;
+use forma_ui::widgets;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EditorKind {
@@ -149,12 +150,23 @@ pub struct EditorStates {
     exceptions: HashMap<u64, exceptions::ExceptionsView>,
 }
 
+/// Раскладка клавиш для редакторов, которые ловят свои сочетания сами.
+#[derive(Clone, Copy)]
+pub struct Keys<'a> {
+    pub actions: &'a Registry,
+    pub keymap: &'a Keymap,
+}
+
 /// Всё, что нужно редакторам для отрисовки. Собирается заново на каждом кадре.
 pub struct Editors<'a> {
     pub pal: &'a Palette,
     pub project: Option<&'a Project>,
     pub tree: &'a mut ProjectTree,
     pub recent: &'a [PathBuf],
+    pub actions: &'a Registry,
+    pub keymap: &'a Keymap,
+    /// Работают ли общие сочетания (пока открыт диалог — нет).
+    pub shortcuts: bool,
     pub next_tab_id: &'a mut u64,
     pub cmds: &'a mut Vec<Cmd>,
     pub docs: &'a mut Documents,
@@ -215,12 +227,14 @@ impl TabViewer for Editors<'_> {
                     let jar_name = jar.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let rel = format!("{jar_name}/{entry}");
                     let doc = self.docs.open_jar(jar, entry);
-                    code::ui(ui, doc, &rel, pal, tab.id, self.font_size, self.now, None, self.cmds);
+                    let keys = Keys { actions: self.actions, keymap: self.keymap };
+                    code::ui(ui, doc, &rel, pal, tab.id, self.font_size, self.now, None, keys, self.cmds);
                 }
                 (Some(project), Some(file), None) => {
                     let rel = file.to_string_lossy().into_owned();
                     let doc = self.docs.open(&project.root.join(file));
-                    code::ui(ui, doc, &rel, pal, tab.id, self.font_size, self.now, self.lsp.as_deref_mut(), self.cmds);
+                    let keys = Keys { actions: self.actions, keymap: self.keymap };
+                    code::ui(ui, doc, &rel, pal, tab.id, self.font_size, self.now, self.lsp.as_deref_mut(), keys, self.cmds);
                 }
                 _ => empty_state(ui, pal, EditorKind::Code.icon(), &t!("code-empty-title"), &t!("code-empty-hint")),
             },
@@ -268,6 +282,14 @@ impl TabViewer for Editors<'_> {
         self.states.console.remove(&tab.id);
         self.states.exceptions.remove(&tab.id);
     }
+
+    fn window_input(&mut self, ui: &mut Ui) {
+        if !self.shortcuts {
+            return;
+        }
+        let fired = ui.input_mut(|i| forma_actions::triggered(i, self.actions, self.keymap, ActionContext::Global));
+        self.cmds.extend(fired.iter().filter_map(|id| crate::app::action_cmd(id)));
+    }
 }
 
 /// Пустое состояние редактора: значок, заголовок, подсказка.
@@ -277,7 +299,7 @@ pub fn empty_state(ui: &mut Ui, pal: &Palette, icon: &str, title: &str, hint: &s
         ui.add_space((height * 0.3 - 50.0).max(12.0));
         ui.label(RichText::new(icon).size(30.0).color(pal.text_faint));
         ui.add_space(4.0);
-        ui.label(RichText::new(title).size(15.0).family(crate::fonts::semibold()).color(pal.heading));
+        ui.label(RichText::new(title).size(15.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(2.0);
         widgets::centered_text(ui, hint, 13.0, pal.text_muted, 380.0);
     });
@@ -290,7 +312,7 @@ fn placeholder(ui: &mut Ui, pal: &Palette, kind: EditorKind) {
         ui.add_space((height * 0.3 - 70.0).max(12.0));
         ui.label(RichText::new(kind.icon()).size(38.0).color(kind.color(pal)));
         ui.add_space(6.0);
-        ui.label(RichText::new(kind.title()).size(18.0).family(crate::fonts::semibold()).color(pal.heading));
+        ui.label(RichText::new(kind.title()).size(18.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(4.0);
         widgets::centered_text(ui, &kind.about(), 13.5, pal.text_muted, 380.0);
         if let Some(stage) = kind.stage() {
@@ -315,7 +337,7 @@ fn no_project(ui: &mut Ui, pal: &Palette, recent: &[PathBuf], cmds: &mut Vec<Cmd
         ui.add_space((height * 0.25 - 60.0).max(12.0));
         ui.label(RichText::new(EditorKind::Project.icon()).size(34.0).color(pal.accent));
         ui.add_space(4.0);
-        ui.label(RichText::new(t!("project-none-title")).size(16.0).family(crate::fonts::semibold()).color(pal.heading));
+        ui.label(RichText::new(t!("project-none-title")).size(16.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(4.0);
         widgets::centered_text(ui, &t!("project-none-hint"), 13.0, pal.text_muted, 320.0);
         ui.add_space(10.0);

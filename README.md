@@ -78,14 +78,20 @@ The name comes from mycelium, the network that quietly connects everything aroun
 - **Workspaces** (Code, Map, Assets, Debug), each with its own layout. A layout can be saved per project, or as the default for all projects.
 - **Discord Rich Presence:** "Mod: Your Mod (yourmod)" with a live status (writing code, running the client, fixing a crash…), a timer and the loader badge. It can be turned off, and a project can be marked secret.
 - **English and Russian UI,** switchable on the fly. Extra languages can be added as Fluent files.
+- **Settings in the spirit of JetBrains IDEs:**
+  - a settings window with a page tree and search across every option;
+  - changes are applied with Apply or OK and discarded with Cancel;
+  - a keymap where every command can be rebound, with conflicts shown as you record a shortcut;
+  - **Find Action** (`Ctrl+Shift+A`);
+  - export and import of settings by category. An archive from another Forma app applies whatever this app understands and reports the rest.
 
 ### Roadmap
 
 1. ✅ **Skeleton:** the composable UI, localization, the build.
 2. ✅ **Project and code:** `.mycelium`, the Gradle model, libraries by origin, runs, the smart console, the exceptions window, jdtls.
 3. 🔧 **Forma platform (in progress):**
-   - settings grouped as in Rider, export and import;
-   - a keymap;
+   - ✅ settings grouped as in Rider, export and import;
+   - ✅ a keymap and Find Action;
    - themes where everything can be restyled: syntax, icons, fonts, background image;
    - plugins: themes, new windows, Python scripting. Heavy tools such as jdtls become optional plugins.
 4. **Hyphae, the knowledge engine.** It understands the whole mod:
@@ -131,12 +137,17 @@ cargo test
 
 ### Shortcuts
 
+The defaults follow IntelliJ IDEA. Every one of them can be changed in **Settings → Keymap**.
+
 | Action | Shortcut |
 |---|---|
+| Find action | `Ctrl+Shift+A` |
 | Settings | `Ctrl+Alt+S` |
 | Run / stop | `Shift+F10` / `Ctrl+F2` |
+| Sync with Gradle | `Ctrl+Shift+O` |
 | Completion | `Ctrl+Space` (opens by itself after `.`) |
 | Go to definition | `Ctrl+click`, `F12` or `Ctrl+B` |
+| Project / Console / Exceptions window | `Alt+1` / `Alt+4` / `Alt+6` |
 | Maximize an area / restore | `Ctrl+Shift+F12` or double-click a tab |
 | Close a tab | Middle-click the tab |
 | Save all | `Ctrl+S` (files also save themselves) |
@@ -144,20 +155,25 @@ cargo test
 
 ### Repository layout
 
+The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `mycelium-*` crates are everything specific to modding.
+
 | Path | Contents |
 |---|---|
 | `crates/mycelium` | The app: window, menus, workspaces, editors, runs, the jdtls client, Discord |
-| `crates/mycelium-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
 | `crates/mycelium-project` | The mod project: `.mycelium`, detection, the Gradle model, libraries, code origin |
 | `crates/mycelium-log` | Parsing and classifying game, Gradle and compiler logs |
-| `crates/mycelium-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks |
-| `locales/<lang>/*.ftl` | UI translations |
+| `crates/forma-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
+| `crates/forma-ui` | Theme, fonts, widgets, the settings window, the keymap page, Find Action |
+| `crates/forma-actions` | Actions and the keymap |
+| `crates/forma-settings` | Settings components, their files, export and import |
+| `crates/forma-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks |
+| `locales/<lang>/*.ftl` | UI translations (`platform.ftl` holds the platform's strings) |
 | `assets/discord/` | Images for Discord Rich Presence |
 | `xtask` | Build tasks (`cargo xtask dist`, `cargo xtask discord-assets`) |
 
 ### Where data lives
 
-- `%APPDATA%\Forma\Mycelium\` stores settings, workspaces, window placement and the default layout.
+- `%APPDATA%\Forma\Mycelium\` stores workspaces, window placement and the default layout. Settings live in `options\`, one file per category (`appearance.json`, `keymap.json`…). Set `FORMA_CONFIG_HOME` to keep them somewhere else, for example for a portable copy.
 - `%LOCALAPPDATA%\Forma\Mycelium\` stores the language server and its per-project indexes. Eclipse metadata lives here, not in your mod.
 - `<mod>\.mycelium\` is the project:
   - `project.json` and `runs.json` are meant for git;
@@ -226,14 +242,20 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 - **Рабочие пространства** («Код», «Карта», «Ассеты», «Отладка»), у каждого своя раскладка. Её можно сохранить для проекта или как стандартную для всех.
 - **Активность в Discord:** «Mod: Your Mod (yourmod)» с живым статусом (пишет код, запущен клиент, разбирается с крашем…), таймером и значком загрузчика. Её можно выключить, а проект — сделать секретным.
 - **Интерфейс на русском и английском,** язык переключается на лету. Другие языки добавляются файлами Fluent.
+- **Настройки в духе IDE от JetBrains:**
+  - окно настроек с деревом страниц и поиском по всем пунктам;
+  - изменения применяются кнопками «Применить» или «ОК» и отменяются «Отменой»;
+  - раскладка клавиш, где любую команду можно переназначить, а занятые сочетания видны прямо при записи;
+  - **«Найти действие»** (`Ctrl+Shift+A`);
+  - экспорт и импорт настроек по категориям. Архив из другой программы Forma применяется в той части, которую программа понимает, остальное перечисляется в отчёте.
 
 ### План
 
 1. ✅ **Каркас:** составной интерфейс, локализация, сборка.
 2. ✅ **Проект и код:** `.mycelium`, модель Gradle, библиотеки по происхождению, запуск, умная консоль, окно исключений, jdtls.
 3. 🔧 **Платформа Forma (идёт сейчас):**
-   - настройки по группам как в Rider, экспорт и импорт;
-   - раскладка клавиш;
+   - ✅ настройки по группам как в Rider, экспорт и импорт;
+   - ✅ раскладка клавиш и «Найти действие»;
    - темы, где можно перекрасить всё: подсветку, иконки, шрифты, фоновую картинку;
    - плагины: темы, новые окна, скрипты на Python. Тяжёлые инструменты вроде jdtls становятся необязательными плагинами.
 4. **Hyphae, движок знаний.** Он понимает весь мод:
@@ -279,12 +301,17 @@ cargo test
 
 ### Горячие клавиши
 
+Сочетания по умолчанию — как в IntelliJ IDEA. Любое можно поменять в **Настройках → Раскладка клавиш**.
+
 | Действие | Сочетание |
 |---|---|
+| Найти действие | `Ctrl+Shift+A` |
 | Настройки | `Ctrl+Alt+S` |
 | Запустить / остановить | `Shift+F10` / `Ctrl+F2` |
+| Синхронизировать с Gradle | `Ctrl+Shift+O` |
 | Автодополнение | `Ctrl+Space` (после `.` открывается само) |
 | Перейти к определению | `Ctrl+щелчок`, `F12` или `Ctrl+B` |
+| Окно «Проект» / «Консоль» / «Исключения» | `Alt+1` / `Alt+4` / `Alt+6` |
 | Развернуть область / вернуть | `Ctrl+Shift+F12` или двойной щелчок по вкладке |
 | Закрыть вкладку | Средняя кнопка мыши по вкладке |
 | Сохранить всё | `Ctrl+S` (файлы и так сохраняются сами) |
@@ -292,20 +319,25 @@ cargo test
 
 ### Устройство репозитория
 
+Крейты `forma-*` — платформа Forma, общая основа программ Forma. Крейты `mycelium-*` — всё, что относится к моддингу.
+
 | Путь | Что внутри |
 |---|---|
 | `crates/mycelium` | Приложение: окно, меню, рабочие пространства, редакторы, запуск, клиент jdtls, Discord |
-| `crates/mycelium-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
 | `crates/mycelium-project` | Проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
 | `crates/mycelium-log` | Разбор и классификация логов игры, Gradle и компиляторов |
-| `crates/mycelium-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов |
-| `locales/<язык>/*.ftl` | Переводы интерфейса |
+| `crates/forma-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
+| `crates/forma-ui` | Тема, шрифты, виджеты, окно настроек, страница раскладки клавиш, «Найти действие» |
+| `crates/forma-actions` | Действия и раскладка клавиш |
+| `crates/forma-settings` | Компоненты настроек, их файлы, экспорт и импорт |
+| `crates/forma-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов |
+| `locales/<язык>/*.ftl` | Переводы интерфейса (`platform.ftl` — строки платформы) |
 | `assets/discord/` | Картинки для активности в Discord |
 | `xtask` | Служебные задачи сборки (`cargo xtask dist`, `cargo xtask discord-assets`) |
 
 ### Где хранятся данные
 
-- `%APPDATA%\Forma\Mycelium\` — настройки, рабочие пространства, положение окна и стандартная раскладка.
+- `%APPDATA%\Forma\Mycelium\` — рабочие пространства, положение окна и стандартная раскладка. Настройки лежат в `options\`, по файлу на категорию (`appearance.json`, `keymap.json`…). Переменная `FORMA_CONFIG_HOME` переносит их в другую папку, например для переносной копии.
 - `%LOCALAPPDATA%\Forma\Mycelium\` — языковой сервер и его индексы по проектам. Метаданные Eclipse лежат здесь, а не в папке мода.
 - `<мод>\.mycelium\` — сам проект:
   - `project.json` и `runs.json` предназначены для git;

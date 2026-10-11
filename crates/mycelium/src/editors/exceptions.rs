@@ -4,14 +4,14 @@
 use std::collections::{BTreeMap, HashSet};
 
 use eframe::egui::{self, Align, Align2, CornerRadius, CursorIcon, FontId, Layout, RichText, Sense, Ui, vec2};
-use mycelium_i18n::t;
+use forma_i18n::t;
 use mycelium_log::{Level, Problem};
 use mycelium_project::{Libraries, Origin};
 
 use super::problem_ui::{self, entry_title, origin_color, origin_label, system_label};
 use crate::app::Cmd;
 use crate::run::Console;
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GroupBy {
@@ -118,7 +118,7 @@ pub fn ui(ui: &mut Ui, pal: &Palette, view: &mut ExceptionsView, console: &Conso
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let modes = [GroupBy::System, GroupBy::Type, GroupBy::Origin, GroupBy::Severity];
         let current = modes.iter().position(|m| *m == view.group_by).unwrap_or(0);
-        if let Some(i) = crate::widgets::segmented(ui, pal, egui::Id::new("mycelium-exceptions-group"), &refs, current, false) {
+        if let Some(i) = forma_ui::widgets::segmented(ui, pal, egui::Id::new("mycelium-exceptions-group"), &refs, current, false) {
             view.group_by = modes[i];
         }
         ui.add_space(6.0);
@@ -239,7 +239,7 @@ fn group_header(ui: &mut Ui, pal: &Palette, label: &str, problems: usize, total:
     }
     let painter = ui.painter_at(rect);
     painter.text(rect.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, if collapsed { "▸" } else { "▾" }, FontId::proportional(12.0), pal.text_faint);
-    let name = painter.text(rect.left_center() + vec2(26.0, 0.0), Align2::LEFT_CENTER, label, FontId::new(13.0, crate::fonts::semibold()), pal.heading);
+    let name = painter.text(rect.left_center() + vec2(26.0, 0.0), Align2::LEFT_CENTER, label, FontId::new(13.0, forma_ui::fonts::semibold()), pal.heading);
     let counts = if total as usize > problems { format!("{problems} · ×{total}") } else { problems.to_string() };
     painter.text(egui::pos2(name.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, counts, FontId::proportional(12.0), pal.text_faint);
     resp.on_hover_cursor(CursorIcon::PointingHand)
@@ -283,7 +283,7 @@ fn problem_row(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, selected: bool
 }
 
 fn details(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, libs: Option<&Libraries>, expanded: &mut HashSet<(u64, usize, usize)>, cmds: &mut Vec<Cmd>) {
-    ui.label(RichText::new(entry_title(&p.sample)).size(17.0).family(crate::fonts::semibold()).color(pal.heading));
+    ui.label(RichText::new(entry_title(&p.sample)).size(17.0).family(forma_ui::fonts::semibold()).color(pal.heading));
     let mut facts = vec![t!("exceptions-count", count = p.count)];
     if let (Some(first), Some(last)) = (&p.first_time, &p.last_time) {
         let (first, last) = (super::console::short_time(first), super::console::short_time(last));

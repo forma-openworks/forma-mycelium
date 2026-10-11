@@ -10,13 +10,13 @@ use eframe::egui::{
     text::{CCursor, CCursorRange},
     vec2,
 };
-use mycelium_i18n::t;
+use forma_i18n::t;
 
 use super::code_assist;
 use crate::app::Cmd;
 use crate::lsp::install::InstallState;
 use crate::lsp::{JavaLsp, LspStatus};
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 /// Файлы больше этого не открываем как текст.
 const MAX_SIZE: u64 = 4 * 1024 * 1024;
@@ -317,7 +317,7 @@ fn indent_for_newline(text: &str, ci: usize) -> String {
 
 /// Редактор файла. `rel` — путь для заголовка. `lsp` — подсказки Java (если проект их ведёт).
 #[allow(clippy::too_many_arguments)]
-pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64, font_size: f32, now: f64, lsp: Option<&mut JavaLsp>, cmds: &mut Vec<Cmd>) {
+pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64, font_size: f32, now: f64, lsp: Option<&mut JavaLsp>, keys: super::Keys, cmds: &mut Vec<Cmd>) {
     header(ui, doc, rel, pal);
     // Подсказки — только для Java-файлов проекта (не для исходников из jar).
     let java = doc.lang == "java" && !doc.readonly();
@@ -356,7 +356,7 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
         code_assist::apply_server_edits(&ctx, id, doc, l, now);
     }
     // Список автодополнения забирает стрелки, Enter и Tab раньше поля ввода.
-    let handled = has_focus && assist.as_deref_mut().is_some_and(|l| code_assist::handle_keys(&ctx, id, doc, l, now));
+    let handled = has_focus && assist.as_deref_mut().is_some_and(|l| code_assist::handle_keys(&ctx, id, doc, l, keys, now));
     if has_focus && !readonly && !handled {
         let tab = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab));
         let enter = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));

@@ -1,6 +1,6 @@
 //! Виджеты в фирменном стиле FORMA (перенесены из Forma: Holotype).
 
-use eframe::egui::{self, Color32, CornerRadius, CursorIcon, FontId, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{ Color32, CornerRadius, CursorIcon, FontId, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::theme::{self, Palette};
 

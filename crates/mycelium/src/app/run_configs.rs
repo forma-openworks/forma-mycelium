@@ -3,10 +3,10 @@
 //! и удалить. Всё сохраняется в `.mycelium/runs.json`.
 
 use eframe::egui::{self, Color32, CornerRadius, CursorIcon, FontId, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
-use mycelium_i18n::t;
+use forma_i18n::t;
 
 use crate::run::{RunConfig, RunKind, RunsFile};
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 struct Row {
     config: RunConfig,
@@ -94,7 +94,7 @@ impl RunConfigsEditor {
 
     pub fn ui(&mut self, ui: &mut Ui, pal: &Palette) -> Option<Outcome> {
         let mut outcome = None;
-        ui.label(RichText::new(t!("runcfg-title")).size(18.0).family(crate::fonts::semibold()).color(pal.heading));
+        ui.label(RichText::new(t!("runcfg-title")).size(18.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(10.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(vec2(240.0, 380.0), egui::Layout::top_down(egui::Align::Min), |ui| self.list(ui, pal));

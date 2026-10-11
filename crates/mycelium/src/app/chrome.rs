@@ -4,14 +4,14 @@
 use std::path::PathBuf;
 
 use eframe::egui::{self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Id, Key, Layout, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
-use mycelium_i18n::t;
+use forma_i18n::t;
 
 use super::run_configs::Outcome;
 use super::{APP_TITLE, Cmd, Modal, MyceliumApp};
+use crate::actions;
 use crate::editors::EditorKind;
-use crate::settings;
-use crate::theme::{self, Accent, Palette, ThemeKind};
-use crate::widgets;
+use forma_ui::theme::{self, Accent, Palette, ThemeKind};
+use forma_ui::widgets;
 use crate::workspace::Builtin;
 
 /// Иконка нужного размера в пикселях экрана — так она остаётся чёткой.
@@ -51,13 +51,13 @@ impl MyceliumApp {
     }
 
     fn menus(&mut self, ui: &mut Ui, pal: &Palette) {
-        let item = |text: String, shortcut: &str| egui::Button::new(text).shortcut_text(shortcut);
+        let item = |text: String, shortcut: String| egui::Button::new(text).shortcut_text(shortcut);
         widgets::top_menu(ui, &t!("menu-file"), false, |ui| {
-            if ui.add(item(t!("action-open-project"), "")).clicked() {
+            if ui.add(item(t!("action-open-project"), self.keys(actions::OPEN_PROJECT))).clicked() {
                 self.cmds.push(Cmd::OpenProjectDialog);
             }
             ui.menu_button(t!("menu-recent-projects"), |ui| {
-                let recent: Vec<PathBuf> = self.settings.recent_projects.iter().filter(|p| p.is_dir()).cloned().collect();
+                let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
                 if recent.is_empty() {
                     ui.label(RichText::new(t!("menu-recent-empty")).color(pal.text_faint));
                 }
@@ -68,19 +68,28 @@ impl MyceliumApp {
                     }
                 }
             });
-            if ui.add_enabled(self.project.is_some(), item(t!("action-close-project"), "")).clicked() {
+            if ui.add_enabled(self.project.is_some(), item(t!("action-close-project"), self.keys(actions::CLOSE_PROJECT))).clicked() {
                 self.cmds.push(Cmd::CloseProject);
             }
             ui.separator();
-            if ui.add_enabled(self.project.is_some(), item(t!("action-save-all"), "Ctrl+S")).clicked() {
+            if ui.add_enabled(self.project.is_some(), item(t!("action-save-all"), self.keys(actions::SAVE_ALL))).clicked() {
                 self.cmds.push(Cmd::SaveAll);
             }
             ui.separator();
-            if ui.add(item(t!("action-settings"), "Ctrl+Alt+S")).clicked() {
+            if ui.add(item(t!("action-settings"), self.keys(actions::SETTINGS))).clicked() {
                 self.cmds.push(Cmd::Settings);
             }
+            ui.menu_button(t!("menu-manage-settings"), |ui| {
+                if ui.add(item(t!("action-export-settings"), self.keys(actions::EXPORT_SETTINGS))).clicked() {
+                    self.cmds.push(Cmd::ExportSettings);
+                }
+                if ui.add(item(t!("action-import-settings"), self.keys(actions::IMPORT_SETTINGS))).clicked() {
+                    self.cmds.push(Cmd::ImportSettings);
+                }
+            });
             ui.separator();
-            if ui.add(item(t!("action-quit"), "Alt+F4")).clicked() {
+            let quit = self.keys(actions::QUIT);
+            if ui.add(item(t!("action-quit"), if quit.is_empty() { "Alt+F4".to_owned() } else { quit })).clicked() {
                 self.cmds.push(Cmd::Quit);
             }
         });
@@ -88,30 +97,35 @@ impl MyceliumApp {
         widgets::top_menu(ui, &t!("menu-view"), true, |ui| {
             ui.menu_button(t!("settings-theme"), |ui| {
                 for (kind, label) in [(ThemeKind::Dark, t!("theme-dark")), (ThemeKind::Light, t!("theme-light"))] {
-                    if ui.add(egui::Button::new(label).selected(self.settings.theme == kind)).clicked() {
-                        self.settings.theme = kind;
+                    if ui.add(egui::Button::new(label).selected(self.settings.appearance.theme == kind)).clicked() {
+                        self.settings.appearance.theme = kind;
                     }
                 }
             });
             ui.menu_button(t!("settings-accent"), |ui| {
                 for a in Accent::ALL {
                     let text = RichText::new(format!("●  {}", a.label())).color(a.color(pal.dark));
-                    if ui.add(egui::Button::new(text).selected(self.settings.accent == a)).clicked() {
-                        self.settings.accent = a;
+                    if ui.add(egui::Button::new(text).selected(self.settings.appearance.accent == a)).clicked() {
+                        self.settings.appearance.accent = a;
                     }
                 }
             });
             ui.horizontal(|ui| {
                 ui.add_space(theme::MENU_PAD_X);
                 ui.label(t!("settings-font-size"));
-                ui.add(egui::Slider::new(&mut self.settings.font_size, 13.0..=22.0).step_by(0.5));
+                ui.add(egui::Slider::new(&mut self.settings.appearance.font_size, 13.0..=22.0).step_by(0.5));
                 ui.add_space(theme::MENU_PAD_X);
             });
             ui.separator();
-            ui.horizontal(|ui| {
-                ui.add_space(theme::MENU_PAD_X);
-                ui.label(RichText::new(t!("view-zoom-hint")).size(12.0).color(pal.text_faint));
-            });
+            if ui.add(item(t!("action-zoom-in"), self.keys(actions::ZOOM_IN))).clicked() {
+                self.cmds.push(Cmd::ZoomIn);
+            }
+            if ui.add(item(t!("action-zoom-out"), self.keys(actions::ZOOM_OUT))).clicked() {
+                self.cmds.push(Cmd::ZoomOut);
+            }
+            if ui.add(item(t!("action-zoom-reset"), self.keys(actions::ZOOM_RESET))).clicked() {
+                self.cmds.push(Cmd::ZoomReset);
+            }
         });
         widgets::top_menu(ui, &t!("menu-run"), false, |ui| {
             if self.configs.is_empty() {
@@ -127,14 +141,14 @@ impl MyceliumApp {
             }
             ui.separator();
             let selected_running = self.selected_config().is_some_and(|c| self.console.is_running_config(&c.id));
-            if ui.add_enabled(selected_running, item(t!("run-stop"), "Ctrl+F2")).clicked() {
+            if ui.add_enabled(selected_running, item(t!("run-stop"), self.keys(actions::STOP))).clicked() {
                 self.cmds.push(Cmd::Stop);
             }
-            if ui.add_enabled(self.console.is_running(), item(t!("run-stop-all"), "")).clicked() {
+            if ui.add_enabled(self.console.is_running(), item(t!("run-stop-all"), self.keys(actions::STOP_ALL))).clicked() {
                 self.cmds.push(Cmd::StopAll);
             }
             ui.separator();
-            if ui.add_enabled(self.project.is_some(), item(format!("✎  {}", t!("run-edit-configs")), "")).clicked() {
+            if ui.add_enabled(self.project.is_some(), item(format!("✎  {}", t!("run-edit-configs")), self.keys(actions::EDIT_RUN_CONFIGS))).clicked() {
                 self.cmds.push(Cmd::EditRunConfigs);
             }
         });
@@ -147,37 +161,41 @@ impl MyceliumApp {
                 }
             });
             ui.separator();
-            if ui.add(item(t!("dock-maximize"), mycelium_layout::MAXIMIZE_SHORTCUT_TEXT)).clicked() {
+            if ui.add(item(t!("dock-maximize"), self.keys(actions::MAXIMIZE))).clicked() {
                 self.cmds.push(Cmd::ToggleMaximize);
             }
-            if ui.add(item(t!("dock-detach"), "")).clicked() {
+            if ui.add(item(t!("dock-detach"), self.keys(actions::DETACH))).clicked() {
                 self.cmds.push(Cmd::DetachFocused);
             }
-            if ui.add_enabled(!self.layout.dock.windows.is_empty(), item(t!("action-return-windows"), "")).clicked() {
+            if ui.add_enabled(!self.layout.dock.windows.is_empty(), item(t!("action-return-windows"), self.keys(actions::RETURN_WINDOWS))).clicked() {
                 self.cmds.push(Cmd::ReturnAllWindows);
             }
             ui.separator();
             ui.menu_button(t!("menu-new-workspace"), |ui| self.new_workspace_items(ui));
             let builtin = self.layout.workspaces[self.layout.active].builtin.is_some();
-            if ui.add_enabled(builtin, item(t!("action-reset-workspace"), "")).clicked() {
+            if ui.add_enabled(builtin, item(t!("action-reset-workspace"), String::new())).clicked() {
                 self.cmds.push(Cmd::ResetWorkspace(self.layout.active));
             }
-            if ui.add(item(t!("action-reset-all-workspaces"), "")).clicked() {
+            if ui.add(item(t!("action-reset-all-workspaces"), String::new())).clicked() {
                 self.cmds.push(Cmd::ResetAllWorkspaces);
             }
             ui.separator();
-            if ui.add(item(t!("layout-save-default"), "")).on_hover_text(t!("layout-save-default-hint")).clicked() {
+            if ui.add(item(t!("layout-save-default"), String::new())).on_hover_text(t!("layout-save-default-hint")).clicked() {
                 self.cmds.push(Cmd::SaveDefaultLayout);
             }
-            if ui.add(item(t!("layout-apply-default"), "")).clicked() {
+            if ui.add(item(t!("layout-apply-default"), String::new())).clicked() {
                 self.cmds.push(Cmd::ApplyDefaultLayout);
             }
-            if ui.add(item(t!("layout-reset-default"), "")).clicked() {
+            if ui.add(item(t!("layout-reset-default"), String::new())).clicked() {
                 self.cmds.push(Cmd::ResetDefaultLayout);
             }
         });
         widgets::top_menu(ui, &t!("menu-help"), false, |ui| {
-            if ui.button(t!("action-about")).clicked() {
+            if ui.add(item(t!("action-find-action"), self.keys(actions::FIND_ACTION))).clicked() {
+                self.cmds.push(Cmd::FindAction);
+            }
+            ui.separator();
+            if ui.add(item(t!("action-about"), self.keys(actions::ABOUT))).clicked() {
                 self.cmds.push(Cmd::About);
             }
         });
@@ -302,7 +320,7 @@ impl MyceliumApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(small(self.gpu_info.clone(), pal.text_faint)).on_hover_text(t!("status-renderer"));
                     ui.label(small("·".into(), pal.text_faint));
-                    ui.label(small(mycelium_i18n::language().to_uppercase(), pal.text_faint)).on_hover_text(t!("settings-language"));
+                    ui.label(small(forma_i18n::language().to_uppercase(), pal.text_faint)).on_hover_text(t!("settings-language"));
                 });
             });
         });
@@ -317,9 +335,9 @@ impl MyceliumApp {
                 ui.add(egui::Image::new(egui::load::SizedTexture::new(logo.id(), vec2(104.0, 104.0))));
                 ui.add_space(14.0);
                 // «FORMA» вразрядку над названием, как подпись студии.
-                ui.label(RichText::new("F O R M A").size(13.0).family(crate::fonts::semibold()).color(pal.accent));
+                ui.label(RichText::new("F O R M A").size(13.0).family(forma_ui::fonts::semibold()).color(pal.accent));
                 ui.add_space(2.0);
-                ui.label(RichText::new("Mycelium").size(38.0).family(crate::fonts::bold()).color(pal.heading));
+                ui.label(RichText::new("Mycelium").size(38.0).family(forma_ui::fonts::bold()).color(pal.heading));
                 ui.add_space(6.0);
                 widgets::centered_text(ui, &t!("welcome-tagline"), 15.0, pal.text_muted, 460.0);
                 ui.add_space(26.0);
@@ -331,7 +349,7 @@ impl MyceliumApp {
                 if ui.add(big(format!("➜  {}", t!("welcome-continue")))).clicked() {
                     self.cmds.push(Cmd::ContinueWithoutProject);
                 }
-                let recent: Vec<PathBuf> = self.settings.recent_projects.iter().filter(|p| p.is_dir()).cloned().collect();
+                let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
                 if !recent.is_empty() {
                     ui.add_space(26.0);
                     ui.label(RichText::new(t!("welcome-recent")).size(13.0).color(pal.text_faint));
@@ -364,13 +382,15 @@ impl MyceliumApp {
         // Диалог плавно проявляется вместе с затемнением фона.
         let t = ctx.animate_bool_with_time(anim_id, true, 0.16);
         let pal = self.pal.clone();
+        let now = Self::now(ctx);
         let focus = std::mem::take(&mut self.modal_focus);
         let mut close = false;
+        let margin = if matches!(modal, Modal::Settings(_)) { 0 } else { 22 };
         let frame = Frame::new()
             .fill(pal.bg_elevated.gamma_multiply(t))
             .stroke(Stroke::new(1.0, pal.border.gamma_multiply(t)))
             .corner_radius(CornerRadius::same(14))
-            .inner_margin(Margin::same(22));
+            .inner_margin(Margin::same(margin));
         let mut rename_done: Option<(usize, String)> = None;
         let resp = egui::Modal::new(Id::new("mycelium-modal"))
             .frame(frame)
@@ -378,7 +398,7 @@ impl MyceliumApp {
             .show(ctx, |ui| {
                 ui.multiply_opacity(t);
                 let title = |ui: &mut Ui, text: String| {
-                    ui.label(RichText::new(text).size(18.0).family(crate::fonts::semibold()).color(pal.heading));
+                    ui.label(RichText::new(text).size(18.0).family(forma_ui::fonts::semibold()).color(pal.heading));
                     ui.add_space(12.0);
                 };
                 let primary = |ui: &mut Ui, text: String| {
@@ -386,24 +406,17 @@ impl MyceliumApp {
                     ui.add(egui::Button::new(RichText::new(text).color(text_color)).fill(pal.accent).min_size(vec2(96.0, 30.0))).clicked()
                 };
                 match &mut modal {
-                    Modal::Settings => {
-                        ui.set_width(440.0);
-                        title(ui, t!("settings-title"));
-                        self.settings_body(ui, &pal);
-                        ui.add_space(16.0);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if primary(ui, t!("action-done")) {
-                                close = true;
-                            }
-                        });
-                    }
+                    Modal::Settings(dialog) => close = self.settings_ui(ui, &pal, dialog),
+                    Modal::FindAction(find) => close = self.find_action_ui(ui, &pal, find),
+                    Modal::Export(export) => close = self.export_ui(ui, &pal, export, now),
+                    Modal::Import(import) => close = self.import_ui(ui, &pal, import),
                     Modal::About => {
                         ui.set_width(380.0);
                         let logo = icon_texture(ui.ctx(), &mut self.logo, 104.0, "mycelium-logo");
                         ui.vertical_centered(|ui| {
                             ui.add(egui::Image::new(egui::load::SizedTexture::new(logo.id(), vec2(72.0, 72.0))));
                             ui.add_space(8.0);
-                            ui.label(RichText::new(APP_TITLE).size(20.0).family(crate::fonts::bold()).color(pal.heading));
+                            ui.label(RichText::new(APP_TITLE).size(20.0).family(forma_ui::fonts::bold()).color(pal.heading));
                             ui.label(RichText::new(t!("about-version", version = env!("CARGO_PKG_VERSION"))).size(12.5).color(pal.text_faint));
                             ui.add_space(8.0);
                             widgets::centered_text(ui, &t!("about-description"), 13.5, pal.text_muted, 340.0);
@@ -458,7 +471,11 @@ impl MyceliumApp {
                     }
                 }
             });
-        if resp.should_close() {
+        // Окно настроек и импорт не закрываются щелчком мимо: там легко потерять изменения.
+        // Escape закрывает их, как «Отмена».
+        let sticky = matches!(modal, Modal::Settings(_) | Modal::Import(_) | Modal::RunConfigs(_));
+        let escape = || resp.is_top_modal && !resp.any_popup_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
+        if (sticky && escape()) || (!sticky && resp.should_close()) {
             close = true;
         }
         if let Some((index, name)) = rename_done {
@@ -471,69 +488,6 @@ impl MyceliumApp {
         // Пока шёл кадр, мог открыться другой диалог — он важнее.
         if !close && self.modal.is_none() {
             self.modal = Some(modal);
-        }
-    }
-
-    fn settings_body(&mut self, ui: &mut Ui, pal: &Palette) {
-        let section = |ui: &mut Ui, text: String| {
-            ui.add_space(6.0);
-            ui.label(RichText::new(text).size(13.0).color(pal.text_muted));
-            ui.add_space(2.0);
-        };
-
-        section(ui, t!("settings-language"));
-        let languages = mycelium_i18n::languages();
-        let mut labels = vec![t!("settings-language-system")];
-        labels.extend(languages.iter().map(|(_, name)| name.clone()));
-        let selected = match &self.settings.language {
-            None => 0,
-            Some(code) => languages.iter().position(|(c, _)| c == code).map_or(0, |i| i + 1),
-        };
-        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        if let Some(i) = widgets::segmented(ui, pal, Id::new("settings-language"), &refs, selected, true) {
-            self.settings.language = if i == 0 { None } else { Some(languages[i - 1].0.clone()) };
-            mycelium_i18n::set_language(&self.settings.effective_language());
-        }
-
-        section(ui, t!("settings-theme"));
-        let themes = [t!("theme-dark"), t!("theme-light")];
-        let refs: Vec<&str> = themes.iter().map(String::as_str).collect();
-        let selected = if self.settings.theme == ThemeKind::Dark { 0 } else { 1 };
-        if let Some(i) = widgets::segmented(ui, pal, Id::new("settings-theme"), &refs, selected, true) {
-            self.settings.theme = if i == 0 { ThemeKind::Dark } else { ThemeKind::Light };
-        }
-
-        section(ui, t!("settings-accent"));
-        ui.horizontal(|ui| {
-            for a in Accent::ALL {
-                let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
-                let selected = self.settings.accent == a;
-                let hover = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), 0.12);
-                let c = a.color(pal.dark);
-                ui.painter().circle_filled(rect.center(), 9.0 + hover * 1.5, c);
-                if selected {
-                    ui.painter().circle_stroke(rect.center(), 13.0, Stroke::new(2.0, c));
-                }
-                if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(a.label()).clicked() {
-                    self.settings.accent = a;
-                }
-            }
-        });
-
-        section(ui, t!("settings-font-size"));
-        ui.add(egui::Slider::new(&mut self.settings.font_size, 13.0..=22.0).step_by(0.5));
-
-        section(ui, "Discord".to_owned());
-        ui.checkbox(&mut self.settings.discord_presence, t!("settings-discord"));
-        if self.project.is_some() {
-            ui.add_enabled(self.settings.discord_presence, egui::Checkbox::new(&mut self.view.discord_secret, t!("settings-discord-secret")))
-                .on_hover_text(t!("settings-discord-secret-hint"));
-        }
-
-        if let Some(dir) = settings::user_locales_dir() {
-            ui.add_space(12.0);
-            let hint = t!("settings-locales-hint", path = dir.display().to_string());
-            ui.add(egui::Label::new(RichText::new(hint).size(11.5).color(pal.text_faint)).wrap());
         }
     }
 

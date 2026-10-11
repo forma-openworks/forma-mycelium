@@ -5,14 +5,14 @@
 use std::collections::HashSet;
 
 use eframe::egui::{self, Align, Align2, CornerRadius, CursorIcon, FontId, Layout, RichText, Sense, Stroke, Ui, vec2};
-use mycelium_i18n::t;
+use forma_i18n::t;
 use mycelium_log::{Entry, Level};
 use mycelium_project::Libraries;
 
 use super::problem_ui::{self, entry_title, level_color, level_tag, origin_color, system_label};
 use crate::app::Cmd;
 use crate::run::{Console, RunConfig, Session, Status};
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 const ROW_H: f32 = 21.0;
 
@@ -204,7 +204,7 @@ fn session_tabs(ui: &mut Ui, pal: &Palette, console: &Console, shown: Option<u64
                 }
             }
             let resp = resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(s.config.command_line());
-            crate::theme::context_menu(&resp, |ui| {
+            forma_ui::theme::context_menu(&resp, |ui| {
                 if s.is_running() && ui.button(t!("run-stop")).clicked() {
                     cmds.push(Cmd::StopSession(s.id));
                 }

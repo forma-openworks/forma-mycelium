@@ -3,11 +3,11 @@
 
 use std::sync::Arc;
 
-use eframe::egui::{
+use egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Shadow, Stroke, TextStyle, Theme, Visuals, style::ScrollStyle,
 };
-use mycelium_i18n::t;
-use mycelium_layout::DockStyle;
+use forma_i18n::t;
+use forma_layout::DockStyle;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -137,7 +137,7 @@ impl Palette {
 
     /// Оформление областей и вкладок для составного интерфейса.
     /// Иконку передаём готовой: рисовать её на каждом кадре дорого.
-    pub fn dock_style(&self, app_title: &str, icon: Arc<egui::IconData>) -> DockStyle {
+    pub fn dock_style(&self, app_title: &str, icon: Arc<egui::IconData>, maximize_keys: Vec<egui::KeyboardShortcut>, maximize_text: String) -> DockStyle {
         DockStyle {
             gap_bg: self.bg_deep,
             area_bg: self.bg,
@@ -151,6 +151,8 @@ impl Palette {
             menu_style,
             icon: Some(icon),
             app_title: app_title.to_owned(),
+            maximize_keys,
+            maximize_text,
         }
     }
 }
@@ -260,10 +262,4 @@ pub fn context_menu(resp: &egui::Response, add: impl FnOnce(&mut egui::Ui)) {
         .style(menu_style)
         .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(MenuConfig::MENU_CONFIG_TAG, menu_config()))
         .show(add);
-}
-
-/// Иконка окна и панели задач (сама картинка рисуется в `icon.rs`).
-pub fn app_icon() -> egui::IconData {
-    let size = 256;
-    egui::IconData { rgba: crate::icon::rgba(size), width: size, height: size }
 }

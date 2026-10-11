@@ -60,24 +60,6 @@ welcome-recent = Recent projects
 
 ## Settings
 
-settings-title = Settings
-settings-language = Interface language
-settings-language-system = System default
-settings-theme = Theme
-settings-accent = Accent color
-settings-font-size = Text size
-settings-locales-hint = You can add your own translations to { $path } (a language folder with .ftl files) — they are picked up on the next launch.
-theme-dark = Dark
-theme-light = Light
-view-zoom-hint = Zoom: Ctrl+= / Ctrl+- / Ctrl+0
-
-accent-violet = Violet
-accent-blue = Blue
-accent-teal = Teal
-accent-green = Green
-accent-amber = Amber
-accent-rose = Rose
-
 ## About
 
 about-version = Version { $version }
@@ -121,3 +103,32 @@ status-lsp-hint = Java assistance (jdtls): errors and warnings across the projec
 settings-discord = Show in Discord which mod I'm working on
 settings-discord-secret = Secret project: hide this mod's name
 settings-discord-secret-hint = Shows “a secret project” instead of the name, with no mod icon or repository link.
+
+settings-page-discord = Discord
+settings-discord-secret-no-project = Open a project to hide its name.
+settings-component-appearance = Language, theme, accent color, text size, zoom
+settings-component-keymap = Your changes to the shortcuts
+settings-component-discord = Discord activity
+
+menu-manage-settings = Manage settings
+action-export-settings = Export settings…
+action-import-settings = Import settings…
+action-find-action = Find action…
+action-sync-gradle = Sync with Gradle
+action-run = Run the selected configuration
+action-zoom-in = Zoom in
+action-zoom-out = Zoom out
+action-zoom-reset = Reset zoom
+action-show-project = Project window
+action-show-console = Console window
+action-show-exceptions = Exceptions window
+action-completion = Code completion
+action-goto-definition = Go to definition
+
+action-group-file = File
+action-group-project = Project
+action-group-run = Run
+action-group-view = View
+action-group-window = Window
+action-group-editor = Code editor
+action-group-help = Help

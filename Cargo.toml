@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/mycelium", "crates/mycelium-layout", "crates/mycelium-i18n", "crates/mycelium-project", "crates/mycelium-log", "xtask"]
+members = ["crates/mycelium", "crates/forma-layout", "crates/forma-i18n", "crates/forma-ui", "crates/forma-actions", "crates/forma-settings", "crates/mycelium-project", "crates/mycelium-log", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,8 +8,11 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-mycelium-i18n = { path = "crates/mycelium-i18n" }
-mycelium-layout = { path = "crates/mycelium-layout" }
+forma-i18n = { path = "crates/forma-i18n" }
+forma-layout = { path = "crates/forma-layout" }
+forma-ui = { path = "crates/forma-ui" }
+forma-actions = { path = "crates/forma-actions" }
+forma-settings = { path = "crates/forma-settings" }
 mycelium-project = { path = "crates/mycelium-project" }
 mycelium-log = { path = "crates/mycelium-log" }
 

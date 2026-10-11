@@ -4,12 +4,12 @@
 use std::collections::HashSet;
 
 use eframe::egui::{self, Color32, CornerRadius, CursorIcon, FontId, RichText, Sense, Stroke, Ui, vec2};
-use mycelium_i18n::t;
+use forma_i18n::t;
 use mycelium_log::{Entry, Frame, Known, Level, System, Throwable};
 use mycelium_project::{Libraries, Origin};
 
 use crate::app::Cmd;
-use crate::theme::Palette;
+use forma_ui::theme::Palette;
 
 /// Цвет происхождения — один и тот же во всей IDE.
 pub fn origin_color(pal: &Palette, origin: &Origin) -> Color32 {
@@ -201,7 +201,7 @@ fn note(ui: &mut Ui, pal: &Palette, title: &str, text: &str, tint: Color32) {
         .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(title).color(pal.heading).family(crate::fonts::semibold()));
+            ui.label(RichText::new(title).color(pal.heading).family(forma_ui::fonts::semibold()));
             ui.add_space(2.0);
             ui.add(egui::Label::new(RichText::new(text).size(13.0).color(pal.text)).wrap());
         });
