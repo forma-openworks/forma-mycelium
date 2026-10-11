@@ -1,103 +1,317 @@
-# Forma Mycelium
+<p align="center">
+  <img src="assets/discord/mycelium.png" width="128" alt="Forma Mycelium logo">
+</p>
 
-Среда разработки модов для Minecraft в духе IDEA и Rider, но заточенная под моддинг: Fabric и NeoForge (с 1.21.1), Java и Kotlin. Подсвечивает и объясняет всё в контексте Майнкрафта, а не абстрактной Java. Часть проекта FORMA.
+<h1 align="center">Forma Mycelium</h1>
 
-Интерфейс рисует egui через wgpu, причём собран только Vulkan-бэкенд.
+<p align="center">
+  <b>An IDE made for Minecraft modding.</b><br>
+  NeoForge and Fabric · Minecraft 1.21.1+ · Java and Kotlin
+</p>
 
-## Что уже есть
+<p align="center">
+  <img alt="Status: early development" src="https://img.shields.io/badge/status-early%20development-8a6cf0">
+  <img alt="Rust 2024" src="https://img.shields.io/badge/Rust-2024-f46623?logo=rust&logoColor=white">
+  <img alt="Rendering: wgpu + Vulkan" src="https://img.shields.io/badge/render-wgpu%20%2B%20Vulkan-a41e22">
+  <img alt="Languages: English, Russian" src="https://img.shields.io/badge/UI-English%20%7C%20%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-4b8bbe">
+</p>
 
-- **Составной интерфейс в духе Blender**: окно делится на области с вкладками-редакторами. Границы областей тянутся мышью, вкладки перетаскиваются между областями (в центр — вкладкой, к краю — новой областью), выносятся в отдельные окна ОС и возвращаются обратно. Закрытое отдельное окно не теряет вкладки — они возвращаются в главное.
-- **Рабочие пространства** сверху: «Код», «Карта», «Ассеты», «Отладка» — у каждого своя раскладка. Пространства можно создавать, копировать, переименовывать (двойной щелчок), сбрасывать и удалять.
-- **Проект как в IDEA**: точка инициализации — скрытая папка `.mycelium` в корне мода. Раскладка интерфейса, раскрытые папки и выбранный запуск хранятся в проекте; «Окно → Сохранить раскладку как стандартную» (как в Blender) задаёт раскладку для проектов, у которых своей ещё нет.
-- **Распознавание мода**: Fabric, NeoForge, Forge, Quilt, мультилоадерные проекты, версии Minecraft и загрузчика, id мода, Java и Kotlin.
-- **Модель проекта от Gradle**: init-скрипт выгружает модули, исходники, зависимости с путями к jar, JDK тулчейна и задачи `run*` в `.mycelium/cache/model.json`. В сам проект ничего не пишется.
-- **Внешние библиотеки по происхождению**: Minecraft (с ресурсами и библиотеками Mojang), загрузчик (с его частями), другие моды, библиотеки, JDK. Пакеты свёрнуты как в IDEA, классы открываются исходниками из `-sources.jar` только для чтения.
-- **Запуск**: клиент, сервер, генерация данных и свои задачи `run*` — из настоящих задач Gradle; сборка и очистка. Несколько конфигураций работают одновременно (например, клиент и сервер для проверки мультиплеера) — у каждого запуска своя вкладка лога. Остановка гасит игру вместе с Gradle.
-- **Конфигурации запуска**: «Изменить конфигурации…» в списке запуска — свои задачи и аргументы Gradle, правка найденных (их всегда можно вернуть как было), скрытие лишних. Хранятся в `.mycelium/runs.json`, их можно класть в git.
-- **Активность в Discord**: «Моддинг: <мод>», статус (пишет код, запущены клиент и сервер, генерирует данные, разбирается с крашем…), таймер и значок загрузчика. Иконка — мода, если она лежит в его публичном GitHub-репозитории, иначе иконка IDE. Выключается в настройках; для секретного проекта название мода скрывается.
-- **Умная консоль**: лог разобран по серьёзности, системе игры (ресурсы, реестры, миксины, отрисовка…) и происхождению (мой мод, Minecraft, загрузчик, другие моды). Фильтры, поиск, стек-трейсы со свёрнутыми чужими кадрами. Безобидный шум самого Minecraft в среде разработки помечается и не считается проблемой.
-- **Окно исключений**: все проблемы запусков со счётчиками повторов, группировкой по системе, типу, происхождению и серьёзности и объяснением известных ошибок простыми словами. Кадр своего мода открывает исходник на нужной строке, кадр Minecraft или NeoForge — их исходник.
-- **Редактор кода** с подсветкой, автосохранением и подсказками Java от jdtls: ошибки волнистой линией, автодополнение (`.` или `Ctrl+Space`, импорты добавляются сами), описание при наведении, переход к определению (`Ctrl+щелчок`, `F12`, `Ctrl+B`) — в том числе в код Minecraft. jdtls устанавливается кнопкой прямо из редактора.
-- **Локализация** на Fluent: русский и английский, переключение на лету. Свои переводы можно положить в `%APPDATA%\Forma\Mycelium\locales\<язык>\*.ftl`.
-- Настройки (тема, акцент, язык, размер текста), экран приветствия, недавние проекты, иконка, вшитая в .exe.
+<p align="center">
+  <a href="#english">English</a> · <a href="#русский">Русский</a>
+</p>
 
-## План
+---
 
-1. ✅ Каркас.
-2. ✅ Проект и код: `.mycelium`, распознавание мода, модель Gradle, внешние библиотеки по происхождению, редактор с jdtls, запуск, умная консоль, окно исключений. Подсказки Kotlin (kotlin-lsp) — следующим шагом.
-3. Карта мода: автосвязи классов и ресурсов, группы как фреймы в Blender, стикеры, кольцо внешних зависимостей, миксины «вмешивается в …».
-4. Ассеты: превью JSON- и OBJ-моделей, данные с проверкой, lang-файлы.
-5. Проверки в контексте Майнкрафта, миксины.
-6. Проверки для Kotlin, перенос мода между версиями, визуальные редакторы, разбор чужих краш-репортов.
+## English
 
-## Сборка и запуск
+### What it is
 
-Нужны Rust (stable, edition 2024) и драйвер видеокарты с поддержкой Vulkan.
+Forma Mycelium is a desktop IDE in the spirit of IntelliJ IDEA and Rider, built for one job: making Minecraft mods.
+
+A general-purpose Java IDE sees a mod as abstract Java. A stack trace is just a stack trace, and your classes sit in one pile with Minecraft's, the loader's and every other mod's. Mycelium reads a project the way a modder does:
+- it knows which code belongs to your mod, Minecraft, the mod loader, another mod or a plain library;
+- it explains problems in the game's own terms: which game system broke, how serious it is, and whose code is behind it.
+
+The name comes from mycelium, the network that quietly connects everything around it. It is also a Minecraft block.
+
+### Who it is for
+
+- **Modders who are still learning.** An error should come with an explanation, not just a wall of red text.
+- **Experienced modders** who want their own code clearly separated from everything else, and a console that filters out noise.
+- **Anyone who works on NeoForge and Fabric** for Minecraft 1.21.1 and newer, in Java or Kotlin.
+
+### How it differs from a general Java IDE
+
+| | General Java IDE | Forma Mycelium |
+|---|---|---|
+| **An exception** | A stack trace | The game system involved (resources, registries, mixins, rendering…), the severity, whose code it is, and a plain-language explanation of known errors |
+| **Dependencies** | A flat list of jars | Grouped by origin: Minecraft, the loader, other mods, libraries, JDK. Each one opens with its sources |
+| **The game log** | Raw text | Classified and filtered. Harmless dev-environment noise is marked and not counted as a problem |
+| **Running the game** | One run at a time | Client, server and data generation side by side, each with its own log, and all their problems collected in one place |
+| **Project settings** | Scattered across Gradle and IDE files | A hidden `.mycelium` folder, like `.idea`. The mod folder stays clean |
+
+### What already works
+
+**Understands your mod**
+- **Mod detection:** NeoForge, Fabric, Forge, Quilt and multi-loader projects, plus the Minecraft and loader versions, the mod id, Java and Kotlin.
+- **The project model comes from Gradle itself.** A small init script exports modules, dependencies with their jar paths, the toolchain JDK and the real `run*` tasks. Nothing is written into the mod.
+- **External libraries by origin.** Minecraft classes open as read-only sources, straight from `-sources.jar`.
+
+**Runs and diagnoses**
+- **Run configurations** are built from the real Gradle tasks: client, server, data generation, build, clean, plus your own tasks and arguments. They are stored in `.mycelium/runs.json`, which you can commit.
+- **Concurrent runs:** for example, a client and a server to test multiplayer, each in its own log tab.
+- **A smart console** that sorts every line by severity, game system and origin, with filters and search. Foreign stack frames are folded.
+- **An exceptions window** that gathers every problem from every run, with repeat counters and grouping. Clicking a frame opens the exact line, in your code or in Minecraft's and NeoForge's sources.
+
+**Helps write code**
+- **A code editor** with syntax highlighting and autosave.
+- **Java assistance through jdtls:**
+  - errors underlined as you type;
+  - completion that adds imports;
+  - documentation on hover;
+  - go to definition (`Ctrl+click`, `F12`, `Ctrl+B`), even into Minecraft's code.
+
+  The language server is installed with one click, only when you want it.
+
+**Feels like home**
+- **A layout in the spirit of Blender.** Any area splits into tabs. Tabs can be dragged between areas or torn out into separate OS windows.
+- **Workspaces** (Code, Map, Assets, Debug), each with its own layout. A layout can be saved per project, or as the default for all projects.
+- **Discord Rich Presence:** "Mod: Your Mod (yourmod)" with a live status (writing code, running the client, fixing a crash…), a timer and the loader badge. It can be turned off, and a project can be marked secret.
+- **English and Russian UI,** switchable on the fly. Extra languages can be added as Fluent files.
+
+### Roadmap
+
+1. ✅ **Skeleton:** the composable UI, localization, the build.
+2. ✅ **Project and code:** `.mycelium`, the Gradle model, libraries by origin, runs, the smart console, the exceptions window, jdtls.
+3. 🔧 **Forma platform (in progress):**
+   - settings grouped as in Rider, export and import;
+   - a keymap;
+   - themes where everything can be restyled: syntax, icons, fonts, background image;
+   - plugins: themes, new windows, Python scripting. Heavy tools such as jdtls become optional plugins.
+4. **Hyphae, the knowledge engine.** It understands the whole mod:
+   - which mod every class, resource and log line belongs to;
+   - client and server sides, threads, loading stages;
+   - mixins and their targets;
+   - what changed between Minecraft and NeoForge versions, and how to port.
+5. **The mod map:** a node graph of your classes and resources with automatic links, groups like Blender frames, sticky notes, and markers for what each part depends on.
+6. **Assets:** JSON and OBJ model preview, validated data files, language files. Kotlin assistance.
+
+### Built with
+
+- [Rust](https://www.rust-lang.org/) and [egui](https://github.com/emilk/egui), rendered through [wgpu](https://wgpu.rs/) on Vulkan. The UI is drawn by the app itself, with no web view.
+- [Fluent](https://projectfluent.org/) for localization.
+- [Eclipse JDT Language Server](https://github.com/eclipse-jdtls/eclipse.jdt.ls) for Java assistance.
+- Gradle init scripts for the project model. No Gradle plugin is added to your mod.
+
+### Building
+
+You need stable Rust (edition 2024) and a GPU driver with Vulkan support. Development and testing currently happen on Windows.
 
 ```bash
 cargo run --release
 ```
 
-Папку проекта мода можно передать аргументом:
+Open a mod right away:
 
 ```bash
-cargo run --release -- "D:\Моды\my-mod"
+cargo run --release -- "D:\Mods\my-mod"
 ```
 
-Готовый `dist\Forma Mycelium.exe` (Cargo не разрешает пробел в имени бинарника, поэтому файл переименовывает служебная задача):
+Build `dist\Forma Mycelium.exe`:
 
 ```bash
 cargo xtask dist
 ```
 
-Тесты:
+Run the tests:
 
 ```bash
 cargo test
 ```
 
-## Горячие клавиши
+### Shortcuts
+
+| Action | Shortcut |
+|---|---|
+| Settings | `Ctrl+Alt+S` |
+| Run / stop | `Shift+F10` / `Ctrl+F2` |
+| Completion | `Ctrl+Space` (opens by itself after `.`) |
+| Go to definition | `Ctrl+click`, `F12` or `Ctrl+B` |
+| Maximize an area / restore | `Ctrl+Shift+F12` or double-click a tab |
+| Close a tab | Middle-click the tab |
+| Save all | `Ctrl+S` (files also save themselves) |
+| Zoom | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
+
+### Repository layout
+
+| Path | Contents |
+|---|---|
+| `crates/mycelium` | The app: window, menus, workspaces, editors, runs, the jdtls client, Discord |
+| `crates/mycelium-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
+| `crates/mycelium-project` | The mod project: `.mycelium`, detection, the Gradle model, libraries, code origin |
+| `crates/mycelium-log` | Parsing and classifying game, Gradle and compiler logs |
+| `crates/mycelium-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks |
+| `locales/<lang>/*.ftl` | UI translations |
+| `assets/discord/` | Images for Discord Rich Presence |
+| `xtask` | Build tasks (`cargo xtask dist`, `cargo xtask discord-assets`) |
+
+### Where data lives
+
+- `%APPDATA%\Forma\Mycelium\` stores settings, workspaces, window placement and the default layout.
+- `%LOCALAPPDATA%\Forma\Mycelium\` stores the language server and its per-project indexes. Eclipse metadata lives here, not in your mod.
+- `<mod>\.mycelium\` is the project:
+  - `project.json` and `runs.json` are meant for git;
+  - `workspace.json` is your personal layout;
+  - `cache\` holds the Gradle model.
+
+### About
+
+Forma Mycelium is part of FORMA. Idea and design: Holo. The code is written entirely by Claude (Anthropic).
+
+---
+
+## Русский
+
+### Что это
+
+Forma Mycelium — среда разработки в духе IntelliJ IDEA и Rider, созданная для одной задачи: делать моды для Minecraft.
+
+Обычная Java-IDE видит мод как абстрактную Java. Стек-трейс для неё просто стек-трейс, а твои классы лежат в одной куче с классами Minecraft, загрузчика и всех остальных модов. Mycelium читает проект так, как его читает моддер:
+- знает, чей это код: твоего мода, Minecraft, загрузчика, другого мода или обычной библиотеки;
+- объясняет проблемы на языке игры: какая система сломалась, насколько это серьёзно и чей код за этим стоит.
+
+Название — от мицелия, сети, которая незаметно связывает всё вокруг. А ещё это блок в Minecraft.
+
+### Для кого
+
+- **Для моддеров, которые только учатся.** Ошибка должна приходить с объяснением, а не стеной красного текста.
+- **Для опытных моддеров,** которым нужно чётко отделять свой код от чужого и консоль без шума.
+- **Для всех, кто пишет под NeoForge и Fabric** для Minecraft 1.21.1 и новее, на Java или Kotlin.
+
+### Чем отличается от обычной Java-IDE
+
+| | Обычная Java-IDE | Forma Mycelium |
+|---|---|---|
+| **Исключение** | Стек-трейс | Система игры (ресурсы, реестры, миксины, отрисовка…), серьёзность, чей это код и объяснение известных ошибок простыми словами |
+| **Зависимости** | Плоский список jar | По происхождению: Minecraft, загрузчик, другие моды, библиотеки, JDK. Каждая открывается с исходниками |
+| **Лог игры** | Сырой текст | Разобран и отфильтрован. Безобидный шум среды разработки помечен и не считается проблемой |
+| **Запуск игры** | Один запуск за раз | Клиент, сервер и генерация данных одновременно, у каждого свой лог, а все проблемы собраны в одном месте |
+| **Настройки проекта** | Разбросаны по Gradle и файлам IDE | Скрытая папка `.mycelium`, как `.idea`. Папка мода остаётся чистой |
+
+### Что уже работает
+
+**Понимает мод**
+- **Распознавание мода:** NeoForge, Fabric, Forge, Quilt и мультилоадерные проекты, версии Minecraft и загрузчика, id мода, Java и Kotlin.
+- **Модель проекта берётся у самого Gradle.** Маленький init-скрипт выгружает модули, зависимости с путями к jar, JDK тулчейна и настоящие задачи `run*`. В мод при этом ничего не пишется.
+- **Внешние библиотеки по происхождению.** Классы Minecraft открываются исходниками из `-sources.jar` только для чтения.
+
+**Запускает и разбирается**
+- **Конфигурации запуска** строятся из настоящих задач Gradle: клиент, сервер, генерация данных, сборка, очистка, плюс свои задачи и аргументы. Хранятся в `.mycelium/runs.json`, его можно класть в git.
+- **Несколько запусков одновременно:** например, клиент и сервер для проверки мультиплеера, каждый в своей вкладке лога.
+- **Умная консоль** раскладывает каждую строку по серьёзности, системе игры и происхождению, с фильтрами и поиском. Чужие кадры стек-трейсов свёрнуты.
+- **Окно исключений** собирает все проблемы всех запусков, со счётчиками повторов и группировкой. Щелчок по кадру открывает нужную строку в твоём коде или в исходниках Minecraft и NeoForge.
+
+**Помогает писать код**
+- **Редактор кода** с подсветкой и автосохранением.
+- **Подсказки Java через jdtls:**
+  - ошибки подчёркиваются прямо при наборе;
+  - автодополнение само добавляет импорты;
+  - при наведении показывается описание;
+  - переход к определению (`Ctrl+щелчок`, `F12`, `Ctrl+B`), в том числе в код Minecraft.
+
+  Языковой сервер ставится одной кнопкой и только когда ты этого хочешь.
+
+**Удобен как дом**
+- **Раскладка в духе Blender.** Любая область делится на вкладки. Их можно перетаскивать между областями и выносить в отдельные окна ОС.
+- **Рабочие пространства** («Код», «Карта», «Ассеты», «Отладка»), у каждого своя раскладка. Её можно сохранить для проекта или как стандартную для всех.
+- **Активность в Discord:** «Mod: Your Mod (yourmod)» с живым статусом (пишет код, запущен клиент, разбирается с крашем…), таймером и значком загрузчика. Её можно выключить, а проект — сделать секретным.
+- **Интерфейс на русском и английском,** язык переключается на лету. Другие языки добавляются файлами Fluent.
+
+### План
+
+1. ✅ **Каркас:** составной интерфейс, локализация, сборка.
+2. ✅ **Проект и код:** `.mycelium`, модель Gradle, библиотеки по происхождению, запуск, умная консоль, окно исключений, jdtls.
+3. 🔧 **Платформа Forma (идёт сейчас):**
+   - настройки по группам как в Rider, экспорт и импорт;
+   - раскладка клавиш;
+   - темы, где можно перекрасить всё: подсветку, иконки, шрифты, фоновую картинку;
+   - плагины: темы, новые окна, скрипты на Python. Тяжёлые инструменты вроде jdtls становятся необязательными плагинами.
+4. **Hyphae, движок знаний.** Он понимает весь мод:
+   - к какому моду относится каждый класс, ресурс и строка лога;
+   - стороны клиента и сервера, потоки, этапы загрузки;
+   - миксины и их цели;
+   - что изменилось между версиями Minecraft и NeoForge и как переносить код.
+5. **Карта мода:** граф твоих классов и ресурсов с автоматическими связями, группами как фреймы в Blender, стикерами и метками того, от чего зависит каждая часть.
+6. **Ассеты:** превью JSON- и OBJ-моделей, проверка файлов данных, lang-файлы. Подсказки для Kotlin.
+
+### На чём сделано
+
+- [Rust](https://www.rust-lang.org/) и [egui](https://github.com/emilk/egui), отрисовка через [wgpu](https://wgpu.rs/) на Vulkan. Интерфейс программа рисует сама, без веб-движка.
+- [Fluent](https://projectfluent.org/) для локализации.
+- [Eclipse JDT Language Server](https://github.com/eclipse-jdtls/eclipse.jdt.ls) для подсказок Java.
+- Init-скрипты Gradle для модели проекта. Никаких плагинов Gradle в мод не добавляется.
+
+### Сборка
+
+Нужны стабильный Rust (edition 2024) и драйвер видеокарты с поддержкой Vulkan. Разработка и проверка сейчас идут на Windows.
+
+```bash
+cargo run --release
+```
+
+Сразу открыть мод:
+
+```bash
+cargo run --release -- "D:\Моды\my-mod"
+```
+
+Собрать `dist\Forma Mycelium.exe`:
+
+```bash
+cargo xtask dist
+```
+
+Запустить тесты:
+
+```bash
+cargo test
+```
+
+### Горячие клавиши
 
 | Действие | Сочетание |
 |---|---|
-| Развернуть область / вернуть | `Ctrl+Shift+F12` или двойной щелчок по вкладке |
-| Закрыть вкладку | средняя кнопка мыши по вкладке |
 | Настройки | `Ctrl+Alt+S` |
-| Сохранить всё | `Ctrl+S` (файлы и так сохраняются сами) |
 | Запустить / остановить | `Shift+F10` / `Ctrl+F2` |
 | Автодополнение | `Ctrl+Space` (после `.` открывается само) |
 | Перейти к определению | `Ctrl+щелчок`, `F12` или `Ctrl+B` |
+| Развернуть область / вернуть | `Ctrl+Shift+F12` или двойной щелчок по вкладке |
+| Закрыть вкладку | Средняя кнопка мыши по вкладке |
+| Сохранить всё | `Ctrl+S` (файлы и так сохраняются сами) |
 | Масштаб | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 
-`Ctrl+Space` оставлен для подсказок в редакторе кода, а `Ctrl+Alt+Space` перехватывает Windows (`Alt+Space` открывает меню окна), поэтому разворачивание — как в IDEA.
-
-## Устройство кода
+### Устройство репозитория
 
 | Путь | Что внутри |
 |---|---|
-| `crates/mycelium` | приложение: окно, меню, рабочие пространства, редакторы |
-| `crates/mycelium/src/editors/` | редакторы во вкладках: `project.rs` — дерево файлов и библиотек, `code.rs` и `code_assist.rs` — редактор и подсказки, `console.rs`, `exceptions.rs` |
-| `crates/mycelium/src/run.rs`, `sync.rs` | запуск задач Gradle и синхронизация модели проекта |
-| `crates/mycelium/src/lsp/` | клиент jdtls: установка, JSON-RPC, ошибки, автодополнение, переход к определению |
-| `crates/mycelium/src/gradle/` | init-скрипты Gradle: выгрузка модели и вывод Eclipse в `build/` |
-| `crates/mycelium/src/discord/` | активность в Discord: локальный канал Discord и сборка активности |
-| `crates/mycelium/src/app/run_configs.rs` | окно «Конфигурации запуска» |
-| `assets/discord/` | картинки для Discord (иконка и значки загрузчиков), `cargo xtask discord-assets` |
-| `crates/mycelium-project` | проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
-| `crates/mycelium-log` | разбор и классификация лога игры, Gradle и компиляторов |
-| `crates/mycelium/src/workspace.rs` | рабочие пространства и их исходные раскладки |
-| `crates/mycelium/src/icon.rs`, `build.rs` | иконка, нарисованная кодом, и вшивание её и сведений о продукте в .exe |
-| `crates/mycelium-layout` | составной интерфейс: дерево областей (`tree.rs`), отрисовка, перетаскивание, отдельные окна (`dock.rs`) |
-| `crates/mycelium-i18n` | локализация: Fluent, макрос `t!`, проверка полноты переводов |
-| `locales/<язык>/*.ftl` | переводы интерфейса |
-| `xtask` | служебные задачи сборки (`cargo xtask dist`) |
+| `crates/mycelium` | Приложение: окно, меню, рабочие пространства, редакторы, запуск, клиент jdtls, Discord |
+| `crates/mycelium-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
+| `crates/mycelium-project` | Проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
+| `crates/mycelium-log` | Разбор и классификация логов игры, Gradle и компиляторов |
+| `crates/mycelium-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов |
+| `locales/<язык>/*.ftl` | Переводы интерфейса |
+| `assets/discord/` | Картинки для активности в Discord |
+| `xtask` | Служебные задачи сборки (`cargo xtask dist`, `cargo xtask discord-assets`) |
 
-## Где что хранится
+### Где хранятся данные
 
-- `%APPDATA%\Forma\Mycelium\settings.json` — настройки.
-- `%APPDATA%\Forma\Mycelium\layout.json` — рабочие пространства и отдельные окна.
-- `%APPDATA%\Forma\Mycelium\window\` — размер и положение главного окна.
-- `%APPDATA%\Forma\Mycelium\default-layout.json` — стандартная раскладка для новых проектов.
-- `<мод>\.mycelium\` — проект: `project.json` и `runs.json` (в git), `workspace.json` (личная раскладка), `cache\` (модель Gradle).
-- `%LOCALAPPDATA%\Forma\Mycelium\servers\jdtls` — языковой сервер Java.
-- `%LOCALAPPDATA%\Forma\Mycelium\jdtls-workspaces\` — индексы jdtls по проектам (метаданные Eclipse лежат здесь, а не в папке мода).
+- `%APPDATA%\Forma\Mycelium\` — настройки, рабочие пространства, положение окна и стандартная раскладка.
+- `%LOCALAPPDATA%\Forma\Mycelium\` — языковой сервер и его индексы по проектам. Метаданные Eclipse лежат здесь, а не в папке мода.
+- `<мод>\.mycelium\` — сам проект:
+  - `project.json` и `runs.json` предназначены для git;
+  - `workspace.json` — твоя личная раскладка;
+  - `cache\` — модель Gradle.
+
+### О проекте
+
+Forma Mycelium — часть FORMA. Идея и дизайн: Holo. Код полностью написан Claude (Anthropic).
