@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use eframe::egui::{self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Id, Key, Layout, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
 use mycelium_i18n::t;
 
+use super::run_configs::Outcome;
 use super::{APP_TITLE, Cmd, Modal, MyceliumApp};
 use crate::editors::EditorKind;
 use crate::settings;
@@ -39,10 +40,9 @@ impl MyceliumApp {
                 ui.add_space(18.0);
                 self.workspace_tabs(ui, &pal);
                 if self.project.is_some() {
-                    let now = ui.input(|i| i.time);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.horizontal(|ui| {
-                            crate::editors::console::run_bar(ui, &pal, &self.console, &self.configs, &mut self.view.run_config, now, false, &mut self.cmds);
+                            crate::editors::console::run_bar(ui, &pal, &self.console, &self.configs, &mut self.view.run_config, &mut self.cmds);
                         });
                     });
                 }
@@ -117,20 +117,25 @@ impl MyceliumApp {
             if self.configs.is_empty() {
                 ui.label(RichText::new(t!("run-no-configs")).color(pal.text_faint));
             }
-            let running = self.console.is_running();
-            for c in self.configs.clone() {
-                let text = format!("{}  {}", c.kind.icon(), c.label());
-                if ui.add_enabled(!running, egui::Button::new(text)).on_hover_text(format!("gradlew {}", c.task)).clicked() {
-                    self.view.run_config = Some(c.id.clone());
-                    self.cmds.push(Cmd::Run);
+            for c in &self.configs {
+                // Идущий запуск помечен точкой; повторный выбор перезапускает его.
+                let running = self.console.is_running_config(&c.id);
+                let text = format!("{}  {}{}", c.kind.icon(), c.label(), if running { "  ●" } else { "" });
+                if ui.button(text).on_hover_text(c.command_line()).clicked() {
+                    self.cmds.push(Cmd::RunConfig(c.id.clone()));
                 }
             }
             ui.separator();
-            if ui.add_enabled(running, item(t!("run-stop"), "Ctrl+F2")).clicked() {
+            let selected_running = self.selected_config().is_some_and(|c| self.console.is_running_config(&c.id));
+            if ui.add_enabled(selected_running, item(t!("run-stop"), "Ctrl+F2")).clicked() {
                 self.cmds.push(Cmd::Stop);
             }
-            if ui.add_enabled(running, item(t!("run-restart"), "")).clicked() {
-                self.cmds.push(Cmd::Rerun);
+            if ui.add_enabled(self.console.is_running(), item(t!("run-stop-all"), "")).clicked() {
+                self.cmds.push(Cmd::StopAll);
+            }
+            ui.separator();
+            if ui.add_enabled(self.project.is_some(), item(format!("✎  {}", t!("run-edit-configs")), "")).clicked() {
+                self.cmds.push(Cmd::EditRunConfigs);
             }
         });
         widgets::top_menu(ui, &t!("menu-window"), false, |ui| {
@@ -260,10 +265,21 @@ impl MyceliumApp {
                     };
                     ui.label(small(text, color)).on_hover_text(t!("status-lsp-hint"));
                 }
-                if let crate::run::Status::Running { since } = self.console.status {
-                    let secs = (ui.input(|i| i.time) - since).max(0.0) as u64;
-                    let text = format!("▶ {} · {}:{:02}", self.console.label, secs / 60, secs % 60);
-                    let resp = ui.add(egui::Label::new(small(text, pal.accent)).sense(Sense::click()));
+                // Все идущие запуски: «▶ Клиент · 1:23 · Сервер · 0:45».
+                let now = ui.input(|i| i.time);
+                let running: Vec<String> = self
+                    .console
+                    .running()
+                    .map(|s| {
+                        let secs = match s.status {
+                            crate::run::Status::Running { since } => (now - since).max(0.0) as u64,
+                            _ => 0,
+                        };
+                        format!("{} · {}:{:02}", s.config.label(), secs / 60, secs % 60)
+                    })
+                    .collect();
+                if !running.is_empty() {
+                    let resp = ui.add(egui::Label::new(small(format!("▶ {}", running.join("  ·  ")), pal.accent)).sense(Sense::click()));
                     if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
                         self.cmds.push(Cmd::OpenEditor(EditorKind::Console));
                     }
@@ -400,6 +416,26 @@ impl MyceliumApp {
                             }
                         });
                     }
+                    Modal::RunConfigs(editor) => {
+                        ui.set_width(760.0);
+                        match editor.ui(ui, &pal) {
+                            Some(Outcome::Done) => {
+                                self.runs = editor.to_file();
+                                if let Some(p) = &self.project {
+                                    if let Err(e) = self.runs.save(&p.root) {
+                                        log::warn!("Failed to save runs.json: {e}");
+                                    }
+                                }
+                                if let Some(id) = editor.selected_id() {
+                                    self.view.run_config = Some(id);
+                                }
+                                self.refresh_configs();
+                                close = true;
+                            }
+                            Some(Outcome::Cancel) => close = true,
+                            None => {}
+                        }
+                    }
                     Modal::Rename { index, name } => {
                         ui.set_width(380.0);
                         title(ui, t!("workspace-rename-title"));
@@ -486,6 +522,13 @@ impl MyceliumApp {
 
         section(ui, t!("settings-font-size"));
         ui.add(egui::Slider::new(&mut self.settings.font_size, 13.0..=22.0).step_by(0.5));
+
+        section(ui, "Discord".to_owned());
+        ui.checkbox(&mut self.settings.discord_presence, t!("settings-discord"));
+        if self.project.is_some() {
+            ui.add_enabled(self.settings.discord_presence, egui::Checkbox::new(&mut self.view.discord_secret, t!("settings-discord-secret")))
+                .on_hover_text(t!("settings-discord-secret-hint"));
+        }
 
         if let Some(dir) = settings::user_locales_dir() {
             ui.add_space(12.0);

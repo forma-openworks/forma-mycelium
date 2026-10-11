@@ -9,7 +9,7 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 def describe(Project p) {
-    def info = [path: p.path, dir: p.projectDir.absolutePath, sourceSets: [], dependencies: [], runTasks: []]
+    def info = [path: p.path, dir: p.projectDir.absolutePath, sourceSets: [], dependencies: [], runTasks: [], tasks: []]
     def sourceSets = p.extensions.findByName('sourceSets')
     if (sourceSets != null) {
         sourceSets.each { s ->
@@ -56,6 +56,8 @@ def describe(Project p) {
     } catch (Throwable ignored) {}
     // Задачи запуска игры: runClient, runServer, runData, runGameTestServer…
     info.runTasks = p.tasks.names.findAll { it.length() > 3 && it.startsWith('run') && Character.isUpperCase(it.charAt(3)) }.sort()
+    // Все задачи — для подсказок в редакторе конфигураций запуска (имена, без создания задач).
+    info.tasks = p.tasks.names.sort()
     return info
 }
 

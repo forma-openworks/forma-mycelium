@@ -2,6 +2,9 @@
 //!
 //! - `dist` — релизная сборка и готовый `dist/Forma Mycelium.exe`
 //!   (Cargo не разрешает пробел в имени бинарника, поэтому файл переименовывается здесь).
+//! - `discord-assets` — картинки для активности в Discord в `assets/discord/`.
+
+mod discord_assets;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -13,8 +16,9 @@ fn main() -> ExitCode {
     let task = std::env::args().nth(1);
     let result = match task.as_deref() {
         Some("dist") => dist(),
+        Some("discord-assets") => discord_assets::render(&root().join("assets").join("discord")),
         _ => {
-            eprintln!("Использование: cargo xtask dist");
+            eprintln!("Использование: cargo xtask dist | discord-assets");
             return ExitCode::from(2);
         }
     };

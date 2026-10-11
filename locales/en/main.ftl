@@ -117,3 +117,24 @@ status-lsp-off = assistance off
 status-lsp-error = jdtls error
 status-lsp-busy = jdtls is reading the project
 status-lsp-hint = Java assistance (jdtls): errors and warnings across the project
+
+settings-discord = Show in Discord which mod I'm working on
+settings-discord-secret = Secret project: hide this mod's name
+settings-discord-secret-hint = Shows “a secret project” instead of the name, with no mod icon or repository link.
+
+discord-modding = Modding: { $name }
+discord-modding-secret = Modding: a secret project 🤫
+discord-no-project = Picking a project
+discord-status = Status: { $status }
+discord-status-code = writing code
+discord-status-client = running the client
+discord-status-server = running the server
+discord-status-client-server = running client & server
+discord-status-data = generating data
+discord-status-build = building the mod
+discord-status-task = running { $name }
+discord-status-crash = fixing a crash 💥
+discord-status-build-failed = fixing the build 🔧
+discord-status-away = on a break ☕
+discord-button-mod = Mod source
+discord-button-ide = Forma Mycelium

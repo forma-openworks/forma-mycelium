@@ -189,6 +189,8 @@ pub struct ViewState {
     pub run_config: Option<String>,
     /// Раздел «Внешние библиотеки» в дереве раскрыт.
     pub libs_open: bool,
+    /// Секретный проект: в Discord не видно ни названия мода, ни его иконки и репозитория.
+    pub discord_secret: bool,
 }
 
 /// Файл раскладки: `workspace.json` проекта, стандартная и глобальная раскладки.
@@ -271,7 +273,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mycelium-layout-{}", std::process::id()));
         let path = dir.join("workspace.json");
         let layout = Layout::factory();
-        let view = ViewState { expanded: vec!["src/main".into()], show_hidden: true, run_config: Some("client".into()), libs_open: true };
+        let view = ViewState { expanded: vec!["src/main".into()], show_hidden: true, run_config: Some("client".into()), libs_open: true, discord_secret: false };
         write_layout(&path, &layout, &view);
         let (back, view_back) = read_layout(&path).unwrap();
         assert_eq!(back.workspaces.len(), 4);

@@ -34,6 +34,8 @@ pub struct Settings {
     pub recent_projects: Vec<PathBuf>,
     /// Проект, открытый при выходе: при запуске он открывается снова.
     pub last_project: Option<PathBuf>,
+    /// Показывать в Discord, над каким модом идёт работа.
+    pub discord_presence: bool,
 }
 
 impl Default for Settings {
@@ -46,6 +48,7 @@ impl Default for Settings {
             zoom: 1.0,
             recent_projects: Vec::new(),
             last_project: None,
+            discord_presence: true,
         }
     }
 }

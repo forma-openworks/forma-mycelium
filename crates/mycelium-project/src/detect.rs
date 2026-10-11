@@ -62,6 +62,8 @@ pub struct ModInfo {
     pub modules: Vec<Module>,
     /// Корневые пакеты кода мода (`com.example.mymod`) — по ним отличаем свой код от чужого.
     pub packages: Vec<String>,
+    /// Иконка мода (`logoFile` или `icon` из метаданных) — путь от корня проекта.
+    pub icon: Option<PathBuf>,
 }
 
 impl ModInfo {
@@ -193,6 +195,20 @@ pub fn detect(root: &Path) -> ModInfo {
         info.mod_id = info.mod_id.take().or_else(|| toml_value(toml, "modId").map(|s| resolve(&s)).filter(|s| !s.contains("${")));
         info.mod_name = info.mod_name.take().or_else(|| toml_value(toml, "displayName").map(|s| resolve(&s)).filter(|s| !s.contains("${")));
     }
+
+    // Иконка: `icon` у Fabric (строка или размеры → самый большой), `logoFile` у NeoForge и Forge.
+    // Путь в метаданных — от корня jar, то есть от папки ресурсов.
+    let icon = fabric_meta
+        .as_ref()
+        .and_then(|m| m.get("icon"))
+        .and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Object(o) => o.iter().max_by_key(|(k, _)| k.parse::<u32>().unwrap_or(0)).and_then(|(_, v)| v.as_str().map(str::to_owned)),
+            _ => None,
+        })
+        .or_else(|| toml_meta.as_ref().and_then(|t| toml_value(t, "logoFile")))
+        .map(|s| resolve(&s));
+    info.icon = icon.and_then(|rel| info.resource_roots().map(|r| r.join(rel.trim_start_matches('/'))).find(|p| root.join(p).is_file()));
 
     // Последняя надежда — имя архива из Fabric-шаблона.
     info.mod_id = info.mod_id.take().or_else(|| prop(&["archives_base_name"]));
@@ -337,7 +353,8 @@ mod tests {
             "gradle.properties",
             "# комментарий\nminecraft_version=1.21.1\nneo_version=21.1.252\nmod_id=testmod\nmod_name=Test Mod\nmod_version=1.0.0\n",
         );
-        write(&root, "src/main/templates/META-INF/neoforge.mods.toml", "[[mods]]\nmodId=\"${mod_id}\"\ndisplayName=\"${mod_name}\"\n");
+        write(&root, "src/main/templates/META-INF/neoforge.mods.toml", "[[mods]]\nmodId=\"${mod_id}\"\ndisplayName=\"${mod_name}\"\nlogoFile=\"${mod_id}.png\"\n");
+        write(&root, "src/main/resources/testmod.png", "png");
         write(&root, "src/main/java/com/holo/testmod/TestMod.java", "package com.holo.testmod;");
         write(&root, "src/main/java/com/holo/testmod/item/Ruby.java", "package com.holo.testmod.item;");
         let info = detect(&root);
@@ -349,6 +366,7 @@ mod tests {
         assert_eq!(info.mod_name.as_deref(), Some("Test Mod"));
         assert_eq!(info.languages, vec![Language::Java]);
         assert_eq!(info.packages, vec!["com.holo.testmod".to_owned()]);
+        assert_eq!(info.icon, Some(PathBuf::from("src/main/resources/testmod.png")), "logoFile с подстановкой из gradle.properties");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -357,7 +375,8 @@ mod tests {
         let root = temp("fabric");
         write(&root, "build.gradle", "plugins {\n id 'fabric-loom' version '1.11-SNAPSHOT'\n}\n");
         write(&root, "gradle.properties", "minecraft_version=1.21.1\nloader_version=0.16.5\narchives_base_name=ruby-mod\n");
-        write(&root, "src/main/resources/fabric.mod.json", r#"{"id": "rubymod", "name": "Ruby", "depends": {"minecraft": "~1.21.1"}}"#);
+        write(&root, "src/main/resources/fabric.mod.json", r#"{"id": "rubymod", "name": "Ruby", "icon": {"16": "assets/rubymod/small.png", "128": "assets/rubymod/icon.png"}, "depends": {"minecraft": "~1.21.1"}}"#);
+        write(&root, "src/main/resources/assets/rubymod/icon.png", "png");
         write(&root, "src/main/kotlin/net/holo/ruby/Ruby.kt", "package net.holo.ruby");
         write(&root, "src/client/java/net/holo/ruby/client/RubyClient.java", "");
         let info = detect(&root);
@@ -368,6 +387,7 @@ mod tests {
         assert_eq!(info.languages, vec![Language::Java, Language::Kotlin]);
         assert_eq!(info.packages, vec!["net.holo.ruby".to_owned()]);
         assert_eq!(info.modules[0].source_roots.len(), 2, "и main, и client");
+        assert_eq!(info.icon, Some(PathBuf::from("src/main/resources/assets/rubymod/icon.png")), "самый большой размер");
         let _ = std::fs::remove_dir_all(&root);
     }
 

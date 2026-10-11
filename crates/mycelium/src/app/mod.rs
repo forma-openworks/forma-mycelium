@@ -6,9 +6,11 @@
 //! в папке настроек.
 
 mod chrome;
+mod run_configs;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
 use eframe::egui::{self, Frame, Key, KeyboardShortcut, Modifiers, Ui};
@@ -17,8 +19,10 @@ use mycelium_layout::{DockStyle, Surface, SurfaceKey};
 use mycelium_project::{Project, store};
 
 use crate::editors::{Documents, EditorKind, EditorStates, EditorTab, Editors, ProjectTree};
-use crate::run::{self, Console, RunConfig};
+use crate::run::{self, Console, RunConfig, RunsFile};
+use run_configs::RunConfigsEditor;
 use crate::settings::{self, Settings};
+use crate::discord::{self, ModLinks, PresenceInput, Presence};
 use crate::lsp::{JavaLsp, LspEvent, LspStatus};
 use crate::sync::{GradleSync, SyncResult};
 use crate::theme::{self, Accent, Palette, ThemeKind};
@@ -54,10 +58,19 @@ pub enum Cmd {
     InstallJdtls,
     RestartJdtls,
     SaveAll,
+    /// Запустить выбранную конфигурацию (уже идущую — перезапустить).
     Run,
+    /// Выбрать конфигурацию и запустить.
+    RunConfig(String),
+    /// Остановить выбранную конфигурацию.
     Stop,
-    Rerun,
-    ClearConsole,
+    StopAll,
+    StopSession(u64),
+    RestartSession(u64),
+    /// Убрать вкладку законченного запуска.
+    CloseSession(u64),
+    ClearSession(u64),
+    EditRunConfigs,
     ClearProblems,
     SwitchWorkspace(usize),
     NewWorkspace(Option<Builtin>),
@@ -81,6 +94,7 @@ enum Modal {
     Settings,
     About,
     Rename { index: usize, name: String },
+    RunConfigs(Box<RunConfigsEditor>),
 }
 
 struct Toast {
@@ -102,6 +116,8 @@ pub struct MyceliumApp {
     view: ViewState,
     project: Option<Project>,
     configs: Vec<RunConfig>,
+    /// Свои конфигурации запуска и правки найденных (`.mycelium/runs.json`).
+    runs: RunsFile,
     tree: ProjectTree,
     docs: Documents,
     console: Console,
@@ -109,8 +125,6 @@ pub struct MyceliumApp {
     /// Подсказки Java (jdtls) для открытого проекта.
     lsp: Option<JavaLsp>,
     states: EditorStates,
-    /// Перезапуск: дождаться остановки и запустить снова.
-    rerun_pending: bool,
     /// Экран приветствия вместо рабочего интерфейса.
     welcome: bool,
     modal: Option<Modal>,
@@ -120,6 +134,14 @@ pub struct MyceliumApp {
     gpu_info: String,
     window_title: String,
     was_focused: bool,
+    /// С какого момента окно не в фокусе (для статуса «перерыв» в Discord).
+    unfocused_since: Option<f64>,
+    presence: Presence,
+    /// Иконка и репозиторий мода на GitHub (ищутся в фоне при открытии проекта).
+    links: Option<ModLinks>,
+    links_rx: Option<Receiver<ModLinks>>,
+    /// Когда открыт проект (или запущена программа) — начало таймера в Discord.
+    opened_unix: u64,
     logo: Option<(u32, egui::TextureHandle)>,
     mark: Option<(u32, egui::TextureHandle)>,
 }
@@ -173,13 +195,13 @@ impl MyceliumApp {
             view,
             project: None,
             configs: Vec::new(),
+            runs: RunsFile::default(),
             tree: ProjectTree::default(),
             docs: Documents::default(),
             console: Console::default(),
             sync: GradleSync::default(),
             lsp: None,
             states: EditorStates::default(),
-            rerun_pending: false,
             welcome: true,
             modal: None,
             modal_focus: false,
@@ -188,6 +210,11 @@ impl MyceliumApp {
             gpu_info,
             window_title: String::new(),
             was_focused: true,
+            unfocused_since: None,
+            presence: Presence::default(),
+            links: None,
+            links_rx: None,
+            opened_unix: run::unix_now(),
             logo: None,
             mark: None,
         };
@@ -249,7 +276,7 @@ impl MyceliumApp {
         };
         // Прежний проект (или раскладка без проекта) сохраняется на своё место.
         self.persist();
-        self.console.stop();
+        self.console.stop_all();
         self.docs.clear();
 
         let (layout, view) = workspace::read_layout(&project_layout_path(&project.root)).unwrap_or_else(|| (default_layout(), ViewState::default()));
@@ -259,7 +286,17 @@ impl MyceliumApp {
         self.tree.libs_open = self.view.libs_open;
         self.console = Console::default();
         self.states = EditorStates::default();
-        self.configs = run::configs(&project.info, project.model.as_ref());
+        self.runs = RunsFile::load(&project.root);
+        self.opened_unix = run::unix_now();
+        // Иконку и репозиторий мода ищем в фоне: это git и сеть.
+        self.links = None;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (root, icon) = (project.root.clone(), project.info.icon.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(discord::resolve_links(&root, icon.as_deref()));
+        });
+        self.links_rx = Some(rx);
+        self.configs = run::configs(&project.info, project.model.as_ref(), &self.runs);
         self.sync.on_open(&project, now);
         // Подсказки Java: jdtls запускается сам, если установлен.
         self.lsp = (project.info.gradle && project.info.languages.contains(&mycelium_project::Language::Java))
@@ -279,12 +316,16 @@ impl MyceliumApp {
 
     fn close_project(&mut self) {
         self.persist();
-        self.console.stop();
+        self.console.stop_all();
         self.sync.reset();
         self.lsp = None;
         self.docs.clear();
         self.project = None;
         self.configs.clear();
+        self.runs = RunsFile::default();
+        self.links = None;
+        self.links_rx = None;
+        self.opened_unix = run::unix_now();
         self.console = Console::default();
         self.states = EditorStates::default();
         self.settings.last_project = None;
@@ -465,11 +506,18 @@ impl MyceliumApp {
         self.configs.iter().find(|c| Some(&c.id) == self.view.run_config.as_ref()).or(self.configs.first()).cloned()
     }
 
+    /// Пересчитывает конфигурации запуска (модель, правки) и следит, чтобы выбранная осталась.
+    fn refresh_configs(&mut self) {
+        let Some(p) = &self.project else { return };
+        self.configs = run::configs(&p.info, p.model.as_ref(), &self.runs);
+        if !self.configs.iter().any(|c| Some(&c.id) == self.view.run_config.as_ref()) {
+            self.view.run_config = self.configs.first().map(|c| c.id.clone());
+        }
+    }
+
+    /// Запускает выбранную конфигурацию; уже идущая перезапускается, остальные запуски не трогаются.
     fn start_run(&mut self, now: f64) {
         let (Some(project), Some(config)) = (&self.project, self.selected_config()) else { return };
-        if self.console.is_running() {
-            return;
-        }
         let root = project.root.clone();
         let rules = project.rules.clone();
         for err in self.docs.save_all() {
@@ -513,8 +561,8 @@ impl MyceliumApp {
                 Cmd::Redetect => {
                     if let Some(p) = &mut self.project {
                         p.redetect();
-                        self.configs = run::configs(&p.info, p.model.as_ref());
                     }
+                    self.refresh_configs();
                 }
                 Cmd::SyncGradle => {
                     if let Some(p) = &self.project {
@@ -537,12 +585,31 @@ impl MyceliumApp {
                     }
                 }
                 Cmd::Run => self.start_run(now),
-                Cmd::Stop => self.console.stop(),
-                Cmd::Rerun => {
-                    self.console.stop();
-                    self.rerun_pending = true;
+                Cmd::RunConfig(id) => {
+                    self.view.run_config = Some(id);
+                    self.start_run(now);
                 }
-                Cmd::ClearConsole => self.console.clear(),
+                Cmd::Stop => {
+                    if let Some(id) = self.selected_config().and_then(|c| self.console.session_of(&c.id).map(|s| s.id)) {
+                        self.console.stop(id);
+                    }
+                }
+                Cmd::StopAll => self.console.stop_all(),
+                Cmd::StopSession(id) => self.console.stop(id),
+                Cmd::RestartSession(id) => {
+                    let rules = self.project.as_ref().map(|p| p.rules.clone()).unwrap_or_default();
+                    self.console.restart(id, rules, now);
+                }
+                Cmd::CloseSession(id) => self.console.close(id),
+                Cmd::ClearSession(id) => self.console.clear(id),
+                Cmd::EditRunConfigs => {
+                    if let Some(p) = &self.project {
+                        let detected = run::detected_configs(&p.info, p.model.as_ref());
+                        let tasks = gradle_tasks(p);
+                        let editor = RunConfigsEditor::new(detected, &self.runs, tasks, self.view.run_config.as_deref());
+                        self.modal = Some(Modal::RunConfigs(Box::new(editor)));
+                    }
+                }
                 Cmd::ClearProblems => self.console.problems.clear(),
                 Cmd::SwitchWorkspace(i) => {
                     if i < self.layout.workspaces.len() {
@@ -697,7 +764,8 @@ impl MyceliumApp {
 
     /// Фоновая работа кадра: вывод запуска, автосохранение, файлы, изменённые снаружи.
     fn background(&mut self, ctx: &egui::Context, now: f64) {
-        if self.console.poll(now) || self.console.is_running() {
+        let rules = self.project.as_ref().map(|p| p.rules.clone()).unwrap_or_default();
+        if self.console.poll(&rules, now) || self.console.is_running() {
             ctx.request_repaint_after_secs(0.1);
         }
         self.apply_sync(now);
@@ -705,10 +773,6 @@ impl MyceliumApp {
             ctx.request_repaint_after_secs(0.2);
         }
         self.poll_lsp(ctx, now);
-        if self.rerun_pending && !self.console.is_running() {
-            self.rerun_pending = false;
-            self.start_run(now);
-        }
         let (errors, waiting) = self.docs.autosave(now);
         for err in errors {
             self.toast(err, true, now);
@@ -722,6 +786,7 @@ impl MyceliumApp {
             self.docs.reload_changed();
             self.tree.refresh();
         }
+        self.unfocused_since = if focused { None } else { self.unfocused_since.or(Some(now)) };
         if !focused && self.was_focused {
             for err in self.docs.save_all() {
                 self.toast(err, true, now);
@@ -735,6 +800,40 @@ impl MyceliumApp {
                 self.layout.surfaces().flat_map(|s| s.areas().into_iter().flat_map(|a| a.tabs.iter().filter_map(|t| t.doc_key(&project.root)))).collect();
             self.docs.retain_open(&open);
         }
+    }
+
+    /// Активность в Discord: мод, что сейчас делается, таймер, значок загрузчика.
+    fn update_presence(&mut self, now: f64) {
+        if let Some(rx) = &self.links_rx {
+            if let Ok(links) = rx.try_recv() {
+                self.links = Some(links);
+                self.links_rx = None;
+            }
+        }
+        if !self.settings.discord_presence {
+            self.presence.set(None);
+            return;
+        }
+        let running: Vec<_> = self.console.running().map(|s| (s.config.kind, s.config.label())).collect();
+        // Упал последний законченный запуск, и после него ничего не запускали.
+        let crashed = if running.is_empty() {
+            self.console.sessions.iter().max_by_key(|s| s.started_unix).filter(|s| s.crashed).map(|s| s.config.kind)
+        } else {
+            None
+        };
+        let started_unix = self.console.running().map(|s| s.started_unix).min().unwrap_or(self.opened_unix);
+        // Перерыв: окно давно не в фокусе и ничего не запущено.
+        let away = running.is_empty() && self.unfocused_since.is_some_and(|t| now - t > 600.0);
+        let input = PresenceInput {
+            project: self.project.as_ref(),
+            running,
+            crashed,
+            started_unix,
+            away,
+            secret: self.view.discord_secret,
+            links: self.links.as_ref(),
+        };
+        self.presence.set(Some(discord::activity(&input)));
     }
 
     /// Сообщения jdtls и переходы к определению.
@@ -763,10 +862,7 @@ impl MyceliumApp {
             match result {
                 SyncResult::Model(model) => {
                     project.model = Some(model);
-                    self.configs = run::configs(&project.info, project.model.as_ref());
-                    if !self.configs.iter().any(|c| Some(&c.id) == self.view.run_config.as_ref()) {
-                        self.view.run_config = self.configs.first().map(|c| c.id.clone());
-                    }
+                    self.refresh_configs();
                 }
                 SyncResult::Libraries(libs) => project.libraries = Some(libs),
                 SyncResult::Failed { message, output } => {
@@ -834,6 +930,7 @@ impl eframe::App for MyceliumApp {
         self.toast_ui(&ctx);
         self.process_cmds(&ctx);
         self.update_title(&ctx);
+        self.update_presence(now);
     }
 
     /// eframe вызывает это раз в полминуты и при выходе.
@@ -843,7 +940,7 @@ impl eframe::App for MyceliumApp {
 
     fn on_exit(&mut self) {
         self.persist();
-        self.console.stop();
+        self.console.stop_all();
         // jdtls завершается по-хорошему, чтобы сохранить свою рабочую папку.
         self.lsp = None;
     }
@@ -864,4 +961,17 @@ fn reveal_in_explorer(path: &Path) {
         let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
         let _ = std::process::Command::new(opener).arg(dir).spawn();
     }
+}
+
+/// Задачи Gradle проекта для подсказок: `runClient`, `:fabric:build`… Задачи запуска — первыми.
+fn gradle_tasks(project: &Project) -> Vec<String> {
+    let Some(model) = &project.model else { return Vec::new() };
+    let mut out: Vec<String> = model
+        .projects
+        .iter()
+        .flat_map(|p| p.tasks.iter().chain(p.run_tasks.iter()).map(move |t| if p.path == ":" { t.clone() } else { format!("{}:{t}", p.path) }))
+        .collect();
+    out.sort_by_key(|t| (!t.rsplit(':').next().is_some_and(|n| n.starts_with("run")), t.clone()));
+    out.dedup();
+    out
 }

@@ -25,6 +25,8 @@ pub struct GradleProject {
     pub source_sets: Vec<SourceSet>,
     pub dependencies: Vec<Dependency>,
     pub run_tasks: Vec<String>,
+    /// Все задачи модуля — для подсказок при настройке запуска.
+    pub tasks: Vec<String>,
     pub jdk: Option<Jdk>,
     /// Зависимости не разрешились (нет сети, ошибка в build.gradle).
     pub error: Option<String>,
