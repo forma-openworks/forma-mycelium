@@ -13,7 +13,7 @@ use std::sync::Arc;
 pub use detect::{Language, Loader, ModInfo};
 pub use libraries::Libraries;
 pub use model::GradleModel;
-pub use origin::{Origin, OriginRules};
+pub use origin::{ModMap, Origin, OriginRules, abbreviate_package};
 pub use store::ProjectMeta;
 
 /// Открытый проект.

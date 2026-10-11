@@ -50,3 +50,12 @@ known-compile-error-explain = Код не скомпилировался. Щёл
 
 known-build-failed-title = Сборка Gradle не удалась
 known-build-failed-explain = Gradle остановил сборку. В подробностях написано, что пошло не так (What went wrong): чаще всего это ошибка компиляции или зависимость, которую не удалось скачать.
+
+known-obj-material-title = Не найден материал OBJ
+known-obj-material-explain = OBJ-модель использует материал (строка «usemtl»), которого нет в её библиотеке материалов. Проверьте, что имя после usemtl в точности совпадает со строкой «newmtl» в файле .mtl, а «mtllib» в .obj указывает на нужный .mtl рядом с моделью.
+
+known-obj-file-title = Нет файла OBJ-модели
+known-obj-file-explain = NeoForge не нашёл или не смог прочитать модель .obj или её библиотеку материалов .mtl. Проверьте путь «model» в JSON модели (это id ресурса вида mymod:models/item/ruby.obj) и строку «mtllib» в файле .obj.
+
+known-invalid-path-title = Недопустимое имя файла в ресурсах
+known-invalid-path-explain = Файл в assets или data мода назван не по правилам id: в id можно только строчные латинские буквы, цифры и _ - . / (без заглавных и пробелов). Игра такие файлы пропускает. Переименуйте файл строчными буквами или удалите, если это лишний файл (.bbmodel, заметка TODO).

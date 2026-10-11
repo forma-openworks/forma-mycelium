@@ -23,7 +23,10 @@ pub struct GradleProject {
     pub path: String,
     pub dir: PathBuf,
     pub source_sets: Vec<SourceSet>,
+    /// Classpath компиляции.
     pub dependencies: Vec<Dependency>,
+    /// Classpath запуска игры (`runtimeClasspath`). У моделей старых версий пуст.
+    pub runtime_dependencies: Vec<Dependency>,
     pub run_tasks: Vec<String>,
     /// Все задачи модуля — для подсказок при настройке запуска.
     pub tasks: Vec<String>,
@@ -41,7 +44,7 @@ pub struct SourceSet {
     pub resources: Vec<PathBuf>,
 }
 
-/// Зависимость на classpath компиляции.
+/// Зависимость на classpath компиляции или запуска.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Dependency {
@@ -76,6 +79,20 @@ impl GradleModel {
         self.projects
             .iter()
             .flat_map(|p| p.dependencies.iter())
+            .filter(|d| d.project.is_none() && seen.insert(d.file.clone()))
+            .collect()
+    }
+
+    /// Classpath запуска всех модулей без повторов, кроме своих подпроектов. Если модель
+    /// его не знает (выгружена старой версией), — classpath компиляции.
+    pub fn runtime_dependencies(&self) -> Vec<&Dependency> {
+        if self.projects.iter().all(|p| p.runtime_dependencies.is_empty()) {
+            return self.dependencies();
+        }
+        let mut seen = std::collections::HashSet::new();
+        self.projects
+            .iter()
+            .flat_map(|p| p.runtime_dependencies.iter())
             .filter(|d| d.project.is_none() && seen.insert(d.file.clone()))
             .collect()
     }
@@ -128,6 +145,10 @@ mod tests {
         let model: GradleModel = serde_json::from_str(json).unwrap();
         assert_eq!(model.projects[0].run_tasks, vec!["runClient", "runData", "runServer"]);
         assert_eq!(model.dependencies().len(), 2, "повтор и свой подпроект отброшены");
+        assert_eq!(model.runtime_dependencies().len(), 2, "старая модель: classpath запуска = компиляции");
+        let json = r#"{"projects":[{"path":":","dependencies":[{"file":"a.jar"}],"runtimeDependencies":[{"file":"a.jar"},{"file":"create.jar"}]}]}"#;
+        let fresh: GradleModel = serde_json::from_str(json).unwrap();
+        assert_eq!(fresh.runtime_dependencies().len(), 2);
         assert_eq!(model.jdk().unwrap().version, "21");
     }
 }

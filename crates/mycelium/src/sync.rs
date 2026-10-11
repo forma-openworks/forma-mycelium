@@ -1,12 +1,14 @@
 //! Синхронизация с Gradle: init-скрипт выгружает модель проекта (модули, зависимости,
-//! JDK, задачи запуска), а потом в том же фоновом потоке разбираются внешние библиотеки.
-//! Интерфейс в это время не ждёт: результаты забираются из канала на каждом кадре.
+//! JDK, задачи запуска), а потом в том же фоновом потоке разбираются внешние библиотеки
+//! и моды запуска (Hyphae). Интерфейс в это время не ждёт: результаты забираются из
+//! канала на каждом кадре.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 
+use mycelium_hyphae::{RunInput, RunMods};
 use mycelium_project::{GradleModel, Libraries, ModInfo, Project, model, store};
 
 use crate::run::{gradle_command, kill_tree};
@@ -29,6 +31,8 @@ pub enum SyncState {
 pub enum SyncResult {
     Model(GradleModel),
     Libraries(Arc<Libraries>),
+    /// Моды запуска: что попадёт в игру и чьи у них пакеты, и уменьшенные логотипы модов.
+    RunMods(Arc<RunMods>, Vec<(String, eframe::egui::ColorImage)>),
     Failed { message: String, output: Vec<String> },
 }
 
@@ -43,12 +47,14 @@ pub struct GradleSync {
     rx: Receiver<(u64, SyncResult)>,
     cancel: Arc<AtomicBool>,
     running: bool,
+    /// Корень открытого проекта.
+    root: PathBuf,
 }
 
 impl Default for GradleSync {
     fn default() -> Self {
         let (tx, rx) = channel();
-        Self { state: SyncState::Idle, output: Vec::new(), epoch: 0, tx, rx, cancel: Arc::new(AtomicBool::new(false)), running: false }
+        Self { state: SyncState::Idle, output: Vec::new(), epoch: 0, tx, rx, cancel: Arc::new(AtomicBool::new(false)), running: false, root: PathBuf::new() }
     }
 }
 
@@ -71,6 +77,7 @@ impl GradleSync {
     /// или build-файлы менялись — заново через Gradle.
     pub fn on_open(&mut self, project: &Project, now: f64) {
         self.reset();
+        self.root = project.root.clone();
         if let Some(m) = &project.model {
             self.index(m.clone(), project.info.clone());
         }
@@ -86,9 +93,22 @@ impl GradleSync {
         }
         let tx = self.tx.clone();
         let epoch = self.epoch;
+        let root = self.root.clone();
         std::thread::spawn(move || {
             let libs = Libraries::build(&model, &info);
             let _ = tx.send((epoch, SyncResult::Libraries(Arc::new(libs))));
+            let _ = tx.send((epoch, run_mods(&root, &info, &model)));
+        });
+    }
+
+    /// Перечитывает моды запуска в фоне (перед запуском игры: в `run/mods` могли положить
+    /// новый jar). Модели ещё нет — моды берутся только из `run/mods`.
+    pub fn refresh_mods(&self, project: &Project) {
+        let tx = self.tx.clone();
+        let epoch = self.epoch;
+        let (root, info, model) = (project.root.clone(), project.info.clone(), project.model.clone().unwrap_or_default());
+        std::thread::spawn(move || {
+            let _ = tx.send((epoch, run_mods(&root, &info, &model)));
         });
     }
 
@@ -111,6 +131,7 @@ impl GradleSync {
                     let _ = tx.send((epoch, SyncResult::Model(model.clone())));
                     let libs = Libraries::build(&model, &info);
                     let _ = tx.send((epoch, SyncResult::Libraries(Arc::new(libs))));
+                    let _ = tx.send((epoch, run_mods(&root, &info, &model)));
                 }
                 Err((message, output)) => {
                     let _ = tx.send((epoch, SyncResult::Failed { message, output }));
@@ -133,6 +154,7 @@ impl GradleSync {
                                 self.state = SyncState::Idle;
                             }
                         }
+                        SyncResult::RunMods(..) => {}
                         SyncResult::Failed { message, output } => {
                             self.running = false;
                             self.state = SyncState::Failed { message: message.clone() };
@@ -147,6 +169,14 @@ impl GradleSync {
         }
         out
     }
+}
+
+/// Моды запуска по модели (classpath запуска, `run/mods` и вложенные jar) и их логотипы.
+fn run_mods(root: &Path, info: &ModInfo, model: &GradleModel) -> SyncResult {
+    let classpath: Vec<model::Dependency> = model.runtime_dependencies().into_iter().cloned().collect();
+    let run = RunMods::build(&RunInput { root, info, classpath: &classpath });
+    let logos = run.mods.iter().filter_map(|m| Some((m.id.clone(), crate::mods_view::decode_logo(m.logo.as_deref()?)?))).collect();
+    SyncResult::RunMods(Arc::new(run), logos)
 }
 
 /// Выгружает модель: `gradlew --init-script … myceliumModel`. Ошибка — сообщение и хвост вывода.

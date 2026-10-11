@@ -266,7 +266,7 @@ fn expand_placeholders(s: &str, props: &BTreeMap<String, String>) -> String {
 }
 
 /// Значение `ключ = "значение"` из TOML (нам хватает простого разбора строк).
-pub(crate) fn toml_value(text: &str, key: &str) -> Option<String> {
+pub fn toml_value(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let line = line.trim();
         let rest = line.strip_prefix(key)?.trim_start();

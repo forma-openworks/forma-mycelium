@@ -126,7 +126,7 @@ mod tests {
     use mycelium_project::OriginRules;
 
     fn rules() -> OriginRules {
-        OriginRules { mod_ids: vec!["testmod".into()], packages: vec!["com.holo.testmod".into()] }
+        OriginRules { mod_ids: vec!["testmod".into()], packages: vec!["com.holo.testmod".into()], ..OriginRules::default() }
     }
 
     #[test]

@@ -190,10 +190,16 @@ pub enum Known {
     ConcurrentModification,
     CompileError,
     BuildFailed,
+    /// OBJ-модель ссылается на материал, которого нет в её `.mtl`.
+    ObjMaterial,
+    /// Не найден или не читается файл OBJ-модели или её библиотеки материалов.
+    ObjFile,
+    /// Файл в ресурсах мода назван не по правилам id — игра его пропускает.
+    InvalidResourcePath,
 }
 
 impl Known {
-    pub const ALL: [Known; 17] = [
+    pub const ALL: [Known; 20] = [
         Known::MissingTexture,
         Known::MissingModel,
         Known::BlockstateError,
@@ -211,6 +217,9 @@ impl Known {
         Known::ConcurrentModification,
         Known::CompileError,
         Known::BuildFailed,
+        Known::ObjMaterial,
+        Known::ObjFile,
+        Known::InvalidResourcePath,
     ];
 
     /// Ключ для перевода (`known-<ключ>-title`, `known-<ключ>-explain`).
@@ -233,13 +242,16 @@ impl Known {
             Known::ConcurrentModification => "concurrent-modification",
             Known::CompileError => "compile-error",
             Known::BuildFailed => "build-failed",
+            Known::ObjMaterial => "obj-material",
+            Known::ObjFile => "obj-file",
+            Known::InvalidResourcePath => "invalid-path",
         }
     }
 
     /// Система игры, к которой относится проблема.
     pub fn system(self) -> System {
         match self {
-            Known::MissingTexture | Known::MissingModel | Known::BlockstateError => System::Resources,
+            Known::MissingTexture | Known::MissingModel | Known::BlockstateError | Known::ObjMaterial | Known::ObjFile | Known::InvalidResourcePath => System::Resources,
             Known::InvalidResourceLocation | Known::RegistryNotBound => System::Registries,
             Known::ClientClassOnServer | Known::MissingDependency | Known::DuplicateMod | Known::ModConstruction | Known::ClassMissing => {
                 System::ModLoading
@@ -272,7 +284,11 @@ pub struct Entry {
     pub location: Option<SourceLocation>,
     // Классификация.
     pub system: System,
+    /// Чья это проблема: кому её исправлять.
     pub origin: Origin,
+    /// Через кого проблема всплыла, если не через владельца: например, текстуру мода
+    /// не нашёл Minecraft, а мод не загрузился у NeoForge.
+    pub via: Option<Origin>,
     pub known: Option<Known>,
     /// Безобидный шум самого Minecraft или загрузчика в среде разработки: такие
     /// предупреждения есть у любого мода, и исправлять в своём коде нечего.
@@ -295,6 +311,7 @@ impl Entry {
             location: None,
             system: System::Game,
             origin: Origin::Unknown,
+            via: None,
             known: None,
             noise: false,
         }

@@ -50,3 +50,12 @@ known-compile-error-explain = The code didn't compile. Click the error location 
 
 known-build-failed-title = Gradle build failed
 known-build-failed-explain = Gradle stopped the build. The details say what went wrong: most often a compilation error or a dependency that couldn't be downloaded.
+
+known-obj-material-title = OBJ material not found
+known-obj-material-explain = The OBJ model uses a material (a "usemtl" line) that its material library doesn't define. Check that the name after usemtl matches a "newmtl" line in the .mtl file exactly, and that "mtllib" in the .obj points to the right .mtl next to the model.
+
+known-obj-file-title = OBJ model file missing
+known-obj-file-explain = NeoForge couldn't find or read the .obj model or its .mtl material library. Check the "model" path in the model JSON (it's a resource id like mymod:models/item/ruby.obj) and the "mtllib" line in the .obj file.
+
+known-invalid-path-title = Invalid file name in resources
+known-invalid-path-explain = A file in the mod's assets or data has a name that isn't a valid id: ids allow only lowercase Latin letters, digits and _ - . / (no capitals, no spaces). The game skips such files. Rename the file in lowercase, or remove it if it's a leftover (a .bbmodel, a TODO note).

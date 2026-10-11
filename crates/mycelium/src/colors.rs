@@ -24,6 +24,8 @@ forma_ui::theme_tokens! {
         forge = "origin.forge" => "#608cc8",
         /// Другие моды.
         other_mod = "origin.other-mod" => "#e879f9",
+        /// Плашка своего мода (салатовая): у чужих модов плашки цвета «другие моды».
+        tag_own = "mod-tag.own" => "#a3e635",
         /// Обычные библиотеки.
         library = "origin.library" => "#94a3b8",
         /// JDK.
@@ -61,6 +63,8 @@ forma_ui::theme_tokens! {
         kind_console = "editor-kind.console" => "#2dd4bf",
         /// Значок превью модели.
         kind_model = "editor-kind.model" => "#fb923c",
+        /// Значок модов запуска.
+        kind_mods = "editor-kind.mods" => "$origin.other-mod",
 
         /// Файлы Java.
         file_java = "file.java" => "#e8833a",

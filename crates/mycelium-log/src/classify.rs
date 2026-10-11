@@ -1,16 +1,19 @@
-//! Классификация записи: к какой системе игры относится, чья это проблема
-//! и не известная ли это ошибка, которую можно объяснить простыми словами.
+//! Классификация записи: к какой системе игры относится, чья это проблема и через
+//! кого она всплыла, и не известная ли это ошибка, которую можно объяснить простыми словами.
 
 use std::sync::LazyLock;
 
 use mycelium_project::{Origin, OriginRules};
 use regex::Regex;
 
-use crate::model::{Entry, Known, Source, System};
+use crate::model::{Entry, Known, Source, System, Throwable};
 
 /// Идентификатор ресурса `пространство:путь` (`testmod:item/ruby`).
 static RESOURCE_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b([a-z][a-z0-9_.-]*):([a-z0-9_.-]+(?:/[a-z0-9_./-]*)?)").expect("регулярное выражение id ресурса"));
+/// Неправильный id ресурса: после `пространство:` идут любые символы (`railways:Bad Name`),
+/// но не `//` (это адрес в интернете).
+static ANY_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b([a-z][a-z0-9_.-]*):(?:[^\s:/'\x22]|/[^/\s])").expect("регулярное выражение неправильного id"));
 
 pub fn classify(e: &mut Entry, rules: &OriginRules) {
     e.known = detect_known(e);
@@ -20,6 +23,7 @@ pub fn classify(e: &mut Entry, rules: &OriginRules) {
         _ => detect_system(e),
     };
     e.origin = detect_origin(e, rules);
+    e.via = detect_via(e, rules).filter(|v| *v != e.origin);
     e.noise = e.known.is_none() && e.origin != Origin::OwnMod && is_noise(e);
 }
 
@@ -45,6 +49,8 @@ const NOISE: &[&[&str]] = &[
     &["narrator library"],
     // Первый запуск: конфиги создаются заново.
     &["configuration file", "is not correct. correcting"],
+    // Мелкие текстуры уменьшают число уровней mip-карт — так и задумано.
+    &["limits mip level"],
 ];
 
 fn is_noise(e: &Entry) -> bool {
@@ -61,20 +67,44 @@ fn detect_known(e: &Entry) -> Option<Known> {
     if e.source == Source::Compiler && e.level >= crate::model::Level::Error {
         return Some(Known::CompileError);
     }
-    let text = haystack(e);
-    let has = |needles: &[&str]| needles.iter().any(|n| text.contains(n));
+    if e.source == Source::Gradle && haystack(e).contains("build failed") {
+        return Some(Known::BuildFailed);
+    }
+    // Сначала самая глубокая причина: обёртки сверху («не удалось загрузить модель»)
+    // говорят только, где всё сломалось, а причина внизу — что именно.
+    if let Some(t) = &e.throwable {
+        let chain: Vec<&Throwable> = t.chain().collect();
+        for c in chain.iter().rev() {
+            let text = format!("{}: {}", c.type_name, c.message.as_deref().unwrap_or("")).to_lowercase();
+            if let Some(k) = known_in(&text, &[c.short_type()]) {
+                return Some(k);
+            }
+        }
+    }
     let types: Vec<&str> = e.throwable.iter().flat_map(|t| t.chain()).map(|t| t.short_type()).collect();
+    known_in(&haystack(e), &types)
+}
+
+/// Известная проблема по тексту (строчными буквами) и коротким именам типов исключений.
+fn known_in(text: &str, types: &[&str]) -> Option<Known> {
+    let has = |needles: &[&str]| needles.iter().any(|n| text.contains(n));
     let has_type = |names: &[&str]| types.iter().any(|t| names.contains(t));
 
     // Порядок важен: более точные признаки — раньше.
-    if has(&["build failed", "failure: build failed"]) && e.source == Source::Gradle {
-        return Some(Known::BuildFailed);
+    if has(&["material was not found in the library"]) {
+        return Some(Known::ObjMaterial);
+    }
+    if has(&["could not find obj model", "could not read obj model", "obj material library", "obj loader requires a 'model' key"]) {
+        return Some(Known::ObjFile);
     }
     if has(&["attempted to load class"]) && has(&["invalid dist"]) || has(&["in environment type server"]) {
         return Some(Known::ClientClassOnServer);
     }
     if has(&["mixin apply failed", "invalidinjectionexception", "critical injection failure", "mixintransformererror", "invalidmixinexception"]) {
         return Some(Known::MixinFailure);
+    }
+    if has(&["invalid path in pack"]) {
+        return Some(Known::InvalidResourcePath);
     }
     if has(&["non [a-z0-9", "resourcelocationexception", "invalid resource location", "identifierexception"]) {
         return Some(Known::InvalidResourceLocation);
@@ -205,20 +235,81 @@ fn system_by_frames(e: &Entry) -> Option<System> {
         .find_map(|f| PACKAGE_SYSTEMS.iter().find(|(p, _)| f.class.starts_with(p)).map(|(_, s)| *s))
 }
 
+/// «from mod railways» в тексте миксина.
+static FROM_MOD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"from mod ([a-z][a-z0-9_]*)").expect("регулярное выражение мода миксина"));
+/// Конфигурация миксинов: `railways-common.mixins.json`.
+static MIXIN_CONFIG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([a-z0-9_.-]+\.mixins\.json)").expect("регулярное выражение конфигурации миксинов"));
+
+/// Владелец проблемы миксина: мод, названный в тексте, или хозяин конфигурации миксинов.
+fn mixin_owner(e: &Entry, rules: &OriginRules) -> Option<Origin> {
+    let text = e.search_text();
+    if let Some(c) = FROM_MOD.captures(&text) {
+        return Some(rules.namespace(&c[1]));
+    }
+    let config = MIXIN_CONFIG.captures(&text)?;
+    rules.mixin_config(&config[1])
+}
+
+/// Проблема ресурса или данных: её владелец — тот, чей это ресурс, а не код, который
+/// её заметил (текстуру мода не находит Minecraft).
+fn is_resource_problem(e: &Entry) -> bool {
+    matches!(
+        e.known,
+        Some(
+            Known::MissingTexture
+                | Known::MissingModel
+                | Known::BlockstateError
+                | Known::InvalidResourceLocation
+                | Known::InvalidResourcePath
+                | Known::DataParseError
+                | Known::RegistryNotBound
+                | Known::ObjMaterial
+                | Known::ObjFile
+        )
+    ) || matches!(e.system, System::Resources | System::Data)
+}
+
+/// Пространство имён ресурса из текста записи (сообщение, продолжение, сообщения причин).
+/// Чужое для Minecraft пространство важнее: сломанный ресурс мода ссылается и на ванильные.
+fn resource_namespace(e: &Entry) -> Option<String> {
+    let mut texts: Vec<&str> = std::iter::once(e.message.as_str()).chain(e.details.iter().map(String::as_str)).collect();
+    if let Some(t) = &e.throwable {
+        texts.extend(t.chain().filter_map(|c| c.message.as_deref()));
+    }
+    // `railways-common.mixins.json:client.Foo` — это миксин, а не id ресурса.
+    let strict: Vec<String> = texts.iter().flat_map(|t| RESOURCE_ID.captures_iter(t).map(|c| c[1].to_owned())).filter(|ns| !ns.ends_with(".json")).collect();
+    let found = if strict.is_empty() && matches!(e.known, Some(Known::InvalidResourceLocation | Known::InvalidResourcePath)) {
+        texts.iter().flat_map(|t| ANY_ID.captures_iter(t).map(|c| c[1].to_owned())).collect()
+    } else {
+        strict
+    };
+    found.iter().find(|ns| *ns != "minecraft").or(found.first()).cloned()
+}
+
 /// Чья это проблема. Свой код в стек-трейсе важнее всего: даже если упало внутри
-/// Minecraft, начиналось всё в моде.
+/// Minecraft, начиналось всё в моде. У проблем ресурсов владелец — пространство имён.
 fn detect_origin(e: &Entry, rules: &OriginRules) -> Origin {
     if e.source == Source::Compiler {
         return Origin::OwnMod;
     }
-    if let Some(t) = &e.throwable {
-        let frames = || t.chain().flat_map(|c| c.frames.iter());
-        if frames().any(|f| f.origin == Origin::OwnMod) {
-            return Origin::OwnMod;
-        }
-        if let Some(f) = frames().find(|f| !matches!(f.origin, Origin::Java | Origin::Library)) {
-            return f.origin.clone();
-        }
+    if let Some(t) = &e.throwable
+        && t.chain().flat_map(|c| c.frames.iter()).any(|f| f.origin == Origin::OwnMod)
+    {
+        return Origin::OwnMod;
+    }
+    if is_resource_problem(e)
+        && let Some(ns) = resource_namespace(e)
+    {
+        return rules.namespace(&ns);
+    }
+    // Миксин: «… from mod railways» или имя конфигурации миксинов мода.
+    if let Some(o) = mixin_owner(e, rules) {
+        return o;
+    }
+    if let Some(t) = &e.throwable
+        && let Some(f) = t.chain().flat_map(|c| c.frames.iter()).find(|f| !matches!(f.origin, Origin::Java | Origin::Library))
+    {
+        return f.origin.clone();
     }
     let ids = std::iter::once(e.message.as_str()).chain(e.details.iter().map(String::as_str));
     for text in ids {
@@ -232,21 +323,30 @@ fn detect_origin(e: &Entry, rules: &OriginRules) -> Origin {
             return rules.class(logger);
         }
     }
-    if let Some(t) = &e.throwable {
-        if let Some(f) = t.frames.first() {
-            return f.origin.clone();
-        }
+    if let Some(f) = e.throwable.as_ref().and_then(|t| t.frames.first()) {
+        return f.origin.clone();
     }
     Origin::Unknown
+}
+
+/// Через кого проблема всплыла: кто о ней написал (логгер) или где она вылетела
+/// (верхний кадр стека).
+fn detect_via(e: &Entry, rules: &OriginRules) -> Option<Origin> {
+    if matches!(e.source, Source::Compiler | Source::Gradle) {
+        return None;
+    }
+    let by_logger = e.logger.as_deref().filter(|l| l.contains('.')).map(|l| rules.class(l));
+    let by_frame = e.throwable.as_ref().and_then(|t| t.frames.iter().find(|f| f.origin != Origin::Java)).map(|f| f.origin.clone());
+    by_logger.or(by_frame).filter(|o| !matches!(o, Origin::Unknown | Origin::Java))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Level, Throwable};
+    use crate::model::Level;
 
     fn rules() -> OriginRules {
-        OriginRules { mod_ids: vec!["testmod".into()], packages: vec!["com.holo.testmod".into()] }
+        OriginRules { mod_ids: vec!["testmod".into()], packages: vec!["com.holo.testmod".into()], ..OriginRules::default() }
     }
 
     fn entry(msg: &str) -> Entry {
@@ -356,6 +456,81 @@ mod tests {
         e.throwable = Some(t);
         classify(&mut e, &rules());
         assert_eq!(e.system, System::Rendering, "по первому кадру Minecraft");
+    }
+
+    fn frame(class: &str, origin: Origin) -> crate::model::Frame {
+        crate::model::Frame { module: None, class: class.into(), method: "m".into(), file: None, line: None, jar: None, origin }
+    }
+
+    #[test]
+    fn resource_namespace_beats_the_frames_that_noticed_it() {
+        // Модель Steam 'n' Rails не загрузилась внутри кода Minecraft.
+        let mut e = Entry::new(1, Level::Warn, Source::Game, "Unable to load model: 'railways:block/bogey' referenced from: minecraft:stone");
+        e.logger = Some("net.minecraft.client.resources.model.ModelBakery".into());
+        let mut t = Throwable::new("java.lang.RuntimeException", Some("Unable to load model railways:block/bogey".into()));
+        t.frames.push(frame("net.minecraft.client.resources.model.ModelBakery", Origin::Minecraft));
+        e.throwable = Some(t);
+        classify(&mut e, &rules());
+        assert_eq!(e.origin, Origin::OtherMod(Some("railways".into())));
+        assert_eq!(e.via, Some(Origin::Minecraft), "заметил Minecraft");
+    }
+
+    #[test]
+    fn explanation_comes_from_the_deepest_cause() {
+        let mut e = Entry::new(1, Level::Error, Source::Game, "Failed to load model testmod:item/ruby");
+        let mut t = Throwable::new("java.lang.RuntimeException", Some("Unable to load model testmod:item/ruby".into()));
+        t.cause = Some(Box::new(Throwable::new("java.util.NoSuchElementException", Some("The material was not found in the library: ruby_mat".into()))));
+        e.throwable = Some(t);
+        classify(&mut e, &rules());
+        assert_eq!(e.known, Some(Known::ObjMaterial), "а не «модель не найдена»");
+        assert_eq!(e.system, System::Resources);
+        assert_eq!(e.origin, Origin::OwnMod);
+    }
+
+    #[test]
+    fn invalid_ids_name_their_mod() {
+        let mut e = entry("Non [a-z0-9/._-] character in path of location: railways:Bad Name");
+        classify(&mut e, &rules());
+        assert_eq!(e.known, Some(Known::InvalidResourceLocation));
+        assert_eq!(e.origin, Origin::OtherMod(Some("railways".into())));
+        let mut e = entry("See https://example.com/x for Non [a-z0-9/._-] character in path of location");
+        classify(&mut e, &rules());
+        assert_ne!(e.origin, Origin::OtherMod(Some("https".into())), "адрес — не id");
+    }
+
+    #[test]
+    fn mod_loading_failure_surfaces_via_the_loader() {
+        let mut e = entry("Failed to create mod instance. ModID: testmod");
+        e.logger = Some("net.neoforged.fml.ModContainer".into());
+        let mut t = Throwable::new("java.lang.NullPointerException", None);
+        t.frames.push(frame("com.holo.testmod.TestMod", Origin::OwnMod));
+        e.throwable = Some(t);
+        classify(&mut e, &rules());
+        assert_eq!(e.origin, Origin::OwnMod);
+        assert_eq!(e.via, Some(Origin::NeoForge));
+        assert_eq!(e.known, Some(Known::NullPointer), "по самой глубокой причине");
+    }
+
+    #[test]
+    fn mixin_problems_belong_to_their_mod() {
+        let mut e = entry("@Mixin target net.minecraft.client.gui.screens.controls.KeyBindsList$KeyEntry was not found railways-common.mixins.json:client.MixinKeyBindsListKeyEntry from mod railways");
+        e.logger = Some("mixin".into());
+        classify(&mut e, &rules());
+        assert_eq!(e.origin, Origin::OtherMod(Some("railways".into())));
+        let mut e = entry("Mixin apply failed testmod.mixins.json:FooMixin -> net.minecraft.Foo");
+        classify(&mut e, &rules());
+        assert_eq!(e.origin, Origin::OwnMod);
+    }
+
+    #[test]
+    fn invalid_paths_in_packs_are_invalid_ids() {
+        let mut e = Entry::new(1, Level::Error, Source::Game, "Invalid path in pack: railways:models/block/bogey/wide/scotch_yoke/Broad_Gauge_L_0-2-0.bbmodel, ignoring");
+        e.logger = Some("net.minecraft.Util".into());
+        classify(&mut e, &rules());
+        assert_eq!(e.known, Some(Known::InvalidResourcePath));
+        assert_eq!(e.system, System::Resources);
+        assert_eq!(e.origin, Origin::OtherMod(Some("railways".into())));
+        assert_eq!(e.via, Some(Origin::Minecraft));
     }
 
     #[test]

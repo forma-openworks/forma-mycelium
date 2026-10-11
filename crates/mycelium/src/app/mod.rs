@@ -54,6 +54,8 @@ pub enum Cmd {
     CloseProject,
     ContinueWithoutProject,
     OpenEditor(EditorKind),
+    /// Показать проблему (по подписи) в окне исключений.
+    ShowProblem(String),
     /// Открыть файл (путь абсолютный или относительно проекта), при желании на строке.
     OpenFile { path: PathBuf, line: Option<u32> },
     /// Открыть исходник класса из стек-трейса (своего мода или библиотеки).
@@ -219,6 +221,8 @@ pub struct MyceliumApp {
     sync: GradleSync,
     /// Подсказки Java (jdtls) для открытого проекта.
     lsp: Option<JavaLsp>,
+    /// Моды запуска открытого проекта (Hyphae): что попадёт в игру и чьи у них пакеты.
+    run_mods: Option<Arc<mycelium_hyphae::RunMods>>,
     /// Установленные плагины и идущие установки.
     plugins: forma_plugins::Plugins,
     states: EditorStates,
@@ -331,6 +335,7 @@ impl MyceliumApp {
             console: Console::default(),
             sync: GradleSync::default(),
             lsp: None,
+            run_mods: None,
             plugins,
             states: EditorStates::default(),
             welcome: true,
@@ -429,7 +434,14 @@ impl MyceliumApp {
         });
         self.links_rx = Some(rx);
         self.configs = run::configs(&project.info, project.model.as_ref(), &self.runs);
+        self.run_mods = None;
+        crate::mods_view::set(None, Default::default());
+        crate::mods_view::set_rules(&project.rules);
         self.sync.on_open(&project, now);
+        if project.model.is_none() {
+            // Модели ещё нет — моды запуска пока только из `run/mods`.
+            self.sync.refresh_mods(&project);
+        }
         // Подсказки Java: jdtls запускается сам, если установлен.
         self.lsp = (project.info.gradle && project.info.languages.contains(&mycelium_project::Language::Java))
             .then(|| {
@@ -454,6 +466,9 @@ impl MyceliumApp {
         self.console.stop_all();
         self.sync.reset();
         self.lsp = None;
+        self.run_mods = None;
+        crate::mods_view::set(None, Default::default());
+        crate::mods_view::set_rules(&Default::default());
         self.docs.clear();
         self.project = None;
         self.configs.clear();
@@ -655,6 +670,9 @@ impl MyceliumApp {
         let (Some(project), Some(config)) = (&self.project, self.selected_config()) else { return };
         let root = project.root.clone();
         let rules = project.rules.clone();
+        // В `run/mods` могли положить новый jar: моды запуска перечитываются в фоне,
+        // и идущий запуск получит их, как только они будут готовы.
+        self.sync.refresh_mods(project);
         for err in self.docs.save_all() {
             self.toast(err, true, now);
         }
@@ -703,6 +721,10 @@ impl MyceliumApp {
                 Cmd::Redetect => {
                     if let Some(p) = &mut self.project {
                         p.redetect();
+                        if let Some(run) = &self.run_mods {
+                            p.rules = p.rules.with_mods(run.map());
+                        }
+                        crate::mods_view::set_rules(&p.rules);
                     }
                     self.refresh_configs();
                 }
@@ -787,6 +809,10 @@ impl MyceliumApp {
                     }
                 }
                 Cmd::ClearProblems => self.console.problems.clear(),
+                Cmd::ShowProblem(signature) => {
+                    self.states.select_problem(&signature);
+                    self.cmds.push(Cmd::OpenEditor(EditorKind::Exceptions));
+                }
                 Cmd::SwitchWorkspace(i) => {
                     if i < self.layout.workspaces.len() {
                         self.layout.active = i;
@@ -1128,6 +1154,14 @@ impl MyceliumApp {
                     self.refresh_configs();
                 }
                 SyncResult::Libraries(libs) => project.libraries = Some(libs),
+                SyncResult::RunMods(run, logos) => {
+                    project.rules = project.rules.with_mods(run.map());
+                    self.console.set_rules(&project.rules);
+                    let textures = logos.into_iter().map(|(id, img)| (id.clone(), self.ctx.load_texture(format!("mod-logo-{id}"), img, egui::TextureOptions::LINEAR))).collect();
+                    crate::mods_view::set(Some(run.clone()), textures);
+                    crate::mods_view::set_rules(&project.rules);
+                    self.run_mods = Some(run);
+                }
                 SyncResult::Failed { message, output } => {
                     for line in &output {
                         log::warn!("gradle: {line}");
@@ -1156,6 +1190,7 @@ impl MyceliumApp {
             docs: &mut self.docs,
             console: &self.console,
             sync: &self.sync.state,
+            run_mods: self.run_mods.as_deref(),
             lsp: self.lsp.as_mut(),
             configs: &self.configs,
             run_config: &mut self.view.run_config,

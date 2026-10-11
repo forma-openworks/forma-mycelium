@@ -89,10 +89,10 @@ pub fn builtin_surface(b: Builtin, ids: &mut Ids) -> Surface<EditorTab> {
             let code = ids.area(&[Code]);
             Node::split(h, 0.2, left, Node::split(h, 0.58, preview, code))
         }
-        // Код и исключения сверху, консоль снизу.
+        // Код и исключения с модами запуска сверху, консоль снизу.
         Builtin::Debug => {
             let code = ids.area(&[Code]);
-            let exceptions = ids.area(&[Exceptions]);
+            let exceptions = ids.area(&[Exceptions, RunMods]);
             let console = ids.area(&[Console]);
             Node::split(v, 0.64, Node::split(h, 0.6, code, exceptions), console)
         }

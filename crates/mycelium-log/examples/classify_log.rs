@@ -10,7 +10,7 @@ fn main() {
     let packages = args.next().map(|p| vec![p]).unwrap_or_default();
     let mod_ids = args.next().map(|m| vec![m]).unwrap_or_default();
     let text = std::fs::read_to_string(&path).expect("лог читается");
-    let mut parser = Parser::new(OriginRules { mod_ids, packages });
+    let mut parser = Parser::new(OriginRules { mod_ids, packages, ..OriginRules::default() });
     let mut store = ProblemStore::default();
     store.start_run();
     let mut entries = Vec::new();

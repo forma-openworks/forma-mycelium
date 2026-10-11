@@ -7,6 +7,7 @@ pub mod console;
 pub mod exceptions;
 pub mod problem_ui;
 mod project;
+mod run_mods;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,11 +38,20 @@ pub enum EditorKind {
     Exceptions,
     Console,
     ModelPreview,
+    /// Моды запуска (Hyphae).
+    RunMods,
 }
 
 impl EditorKind {
-    pub const ALL: [EditorKind; 6] =
-        [EditorKind::Project, EditorKind::Code, EditorKind::ModMap, EditorKind::Exceptions, EditorKind::Console, EditorKind::ModelPreview];
+    pub const ALL: [EditorKind; 7] = [
+        EditorKind::Project,
+        EditorKind::Code,
+        EditorKind::ModMap,
+        EditorKind::Exceptions,
+        EditorKind::Console,
+        EditorKind::RunMods,
+        EditorKind::ModelPreview,
+    ];
 
     pub fn title(self) -> String {
         match self {
@@ -51,6 +61,7 @@ impl EditorKind {
             EditorKind::Exceptions => t!("editor-exceptions"),
             EditorKind::Console => t!("editor-console"),
             EditorKind::ModelPreview => t!("editor-model-preview"),
+            EditorKind::RunMods => t!("editor-run-mods"),
         }
     }
 
@@ -63,13 +74,14 @@ impl EditorKind {
             EditorKind::Exceptions => t!("editor-exceptions-about"),
             EditorKind::Console => t!("editor-console-about"),
             EditorKind::ModelPreview => t!("editor-model-preview-about"),
+            EditorKind::RunMods => t!("editor-run-mods-about"),
         }
     }
 
     /// На каком этапе плана редактор наполнится содержимым.
     fn stage(self) -> Option<u32> {
         match self {
-            EditorKind::Project | EditorKind::Code | EditorKind::Exceptions | EditorKind::Console => None,
+            EditorKind::Project | EditorKind::Code | EditorKind::Exceptions | EditorKind::Console | EditorKind::RunMods => None,
             EditorKind::ModMap => Some(3),
             EditorKind::ModelPreview => Some(4),
         }
@@ -84,6 +96,7 @@ impl EditorKind {
             EditorKind::Exceptions => "editor-exceptions",
             EditorKind::Console => "editor-console",
             EditorKind::ModelPreview => "editor-model",
+            EditorKind::RunMods => "editor-mods",
         }
     }
 
@@ -96,6 +109,7 @@ impl EditorKind {
             EditorKind::Exceptions => c.kind_exceptions,
             EditorKind::Console => c.kind_console,
             EditorKind::ModelPreview => c.kind_model,
+            EditorKind::RunMods => c.kind_mods,
         }
     }
 }
@@ -151,6 +165,19 @@ impl EditorTab {
 pub struct EditorStates {
     console: HashMap<u64, console::ConsoleView>,
     exceptions: HashMap<u64, exceptions::ExceptionsView>,
+    run_mods: HashMap<u64, run_mods::RunModsView>,
+    /// Проблема, которую надо выбрать в окне исключений (откроется и в новой вкладке).
+    pending_problem: Option<String>,
+}
+
+impl EditorStates {
+    /// Выбирает проблему во всех окнах исключений — и в тех, что ещё откроются.
+    pub fn select_problem(&mut self, signature: &str) {
+        for view in self.exceptions.values_mut() {
+            view.select(signature);
+        }
+        self.pending_problem = Some(signature.to_owned());
+    }
 }
 
 /// Раскладка клавиш для редакторов, которые ловят свои сочетания сами.
@@ -175,6 +202,8 @@ pub struct Editors<'a> {
     pub docs: &'a mut Documents,
     pub console: &'a Console,
     pub sync: &'a SyncState,
+    /// Моды запуска (Hyphae), когда они уже разобраны.
+    pub run_mods: Option<&'a mycelium_hyphae::RunMods>,
     pub lsp: Option<&'a mut JavaLsp>,
     pub configs: &'a [RunConfig],
     pub run_config: &'a mut Option<String>,
@@ -247,9 +276,17 @@ impl TabViewer for Editors<'_> {
                 console::ui(ui, pal, self.fonts, view, self.console, libs, self.configs, self.run_config, self.project.is_some(), self.now, self.cmds);
             }
             EditorKind::Exceptions => {
+                let pending = self.states.pending_problem.take();
                 let view = self.states.exceptions.entry(tab.id).or_default();
+                if let Some(signature) = pending {
+                    view.select(&signature);
+                }
                 let libs = self.project.and_then(|p| p.libraries.as_deref());
                 exceptions::ui(ui, pal, view, self.console, libs, self.cmds);
+            }
+            EditorKind::RunMods => {
+                let view = self.states.run_mods.entry(tab.id).or_default();
+                run_mods::ui(ui, pal, view, self.run_mods, self.project.is_some(), self.console, self.sync, self.cmds);
             }
             kind => placeholder(ui, pal, kind),
         }

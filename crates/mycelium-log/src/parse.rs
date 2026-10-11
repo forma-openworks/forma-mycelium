@@ -112,7 +112,10 @@ impl Parser {
             let mut e = self.entry(level, Source::Game, &c["msg"]);
             e.time = Some(c["time"].to_owned());
             e.thread = Some(c["thread"].to_owned());
-            e.logger = c.name("logger").or_else(|| c.name("logger2")).map(|m| m.as_str().to_owned()).filter(|s| !s.is_empty());
+            // В консоли NeoForge логгеры сокращены (`minecraft/Util`, `ne.ne.fm.ModLoader`) —
+            // разворачиваем, чтобы классификация видела то же, что в latest.log.
+            let marker = c.name("marker").map(|m| m.as_str());
+            e.logger = c.name("logger").or_else(|| c.name("logger2")).map(|m| self.rules.expand_logger(m.as_str(), marker)).filter(|s| !s.is_empty());
             if e.message.contains("#@!@# Game crashed!") {
                 e.crash = true;
             }
@@ -339,7 +342,7 @@ mod tests {
     use mycelium_project::Origin;
 
     fn rules() -> OriginRules {
-        OriginRules { mod_ids: vec!["testmod".into()], packages: vec!["com.holo.testmod".into()] }
+        OriginRules { mod_ids: vec!["testmod".into()], packages: vec!["com.holo.testmod".into()], ..OriginRules::default() }
     }
 
     fn parse(text: &str) -> Vec<Entry> {
@@ -361,6 +364,19 @@ mod tests {
         assert_eq!(e[0].logger.as_deref(), Some("net.neoforged.fml.loading.FMLLoader"));
         assert_eq!(e[0].message, "Loading mods");
         assert_eq!(e[0].system, System::ModLoading);
+    }
+
+    #[test]
+    fn neoforge_console_loggers_are_expanded() {
+        let e = parse(
+            "[13:13:57] [Worker-Main-5/ERROR] [minecraft/Util]: Invalid path in pack: railways:models/block/X.bbmodel, ignoring\n[13:13:58] [main/INFO] [ne.ne.fm.ModLoader/LOADING]: Loading\n[13:13:59] [modloading-worker-0/ERROR] [co.ho.te.TestMod/]: Не удалось описать рубин",
+        );
+        assert_eq!(e[0].logger.as_deref(), Some("net.minecraft.Util"));
+        assert_eq!(e[0].via, Some(Origin::Minecraft));
+        assert_eq!(e[1].logger.as_deref(), Some("net.neoforged.fml.ModLoader"));
+        assert_eq!(e[1].system, System::ModLoading);
+        assert_eq!(e[2].logger.as_deref(), Some("com.holo.testmod.TestMod"));
+        assert_eq!(e[2].origin, Origin::OwnMod);
     }
 
     #[test]

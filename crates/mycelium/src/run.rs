@@ -474,6 +474,14 @@ impl Console {
         }
     }
 
+    /// Правила происхождения изменились (например, разобраны моды запуска): идущие
+    /// запуски разбирают дальнейшие строки уже по новым правилам.
+    pub fn set_rules(&mut self, rules: &OriginRules) {
+        for s in &mut self.sessions {
+            s.parser.set_rules(rules.clone());
+        }
+    }
+
     pub fn stop_all(&mut self) {
         for s in &mut self.sessions {
             s.restart = false;

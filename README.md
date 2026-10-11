@@ -62,6 +62,13 @@ The name comes from mycelium, the network that quietly connects everything aroun
 - **Concurrent runs:** for example, a client and a server to test multiplayer, each in its own log tab.
 - **A smart console** that sorts every line by severity, game system and origin, with filters and search. Foreign stack frames are folded.
 - **An exceptions window** that gathers every problem from every run, with repeat counters and grouping. Clicking a frame opens the exact line, in your code or in Minecraft's and NeoForge's sources.
+  - Every problem has an owner, whose problem it is, and the one it surfaced via: a broken texture of Steam 'n' Rails shows as "Create: Steam 'n' Rails (railways) via Minecraft".
+  - Mods are shown with their names and logos. Your own mod's tag is lime.
+  - Messages are marked up: resource ids colored by their owner, invalid characters in ids highlighted, classes and files picked out.
+  - The plain-language explanation is based on the deepest cause in the chain, not on the wrapper on top.
+- **Mods of the run** lists everything that goes into the game: your mod, Minecraft and the loader, other mods from Gradle and `run/mods`, mods nested inside other jars, and libraries.
+  - Each mod shows its logo, version, where it came from, its dependencies and mixin configs.
+  - Problems are counted per mod. A missing required dependency or a mod that is in the run twice is flagged before the game even fails.
 
 **Helps write code**
 - **A code editor** with syntax highlighting and autosave.
@@ -108,8 +115,8 @@ The name comes from mycelium, the network that quietly connects everything aroun
    - ✅ an SVG icon set that themes can replace and recolor, and tools for theme authors;
    - ✅ plugins: a plugin manager, jdtls as an optional plugin, theme packs;
    - Python scripting and new windows from plugins.
-4. **Hyphae, the knowledge engine.** It understands the whole mod:
-   - which mod every class, resource and log line belongs to;
+4. 🔧 **Hyphae, the knowledge engine (in progress, see [docs/hyphae.md](docs/hyphae.md)).** It understands the whole mod:
+   - ✅ the mods of the run and which mod every class, resource and log line belongs to;
    - client and server sides, threads, loading stages;
    - mixins and their targets;
    - what changed between Minecraft and NeoForge versions, and how to port.
@@ -178,6 +185,7 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 | `crates/mycelium` | The app: window, menus, workspaces, editors, runs, the jdtls client, Discord |
 | `crates/mycelium-project` | The mod project: `.mycelium`, detection, the Gradle model, libraries, code origin |
 | `crates/mycelium-log` | Parsing and classifying game, Gradle and compiler logs |
+| `crates/mycelium-hyphae` | Hyphae, the knowledge engine: jars, mod metadata, nested jars, the mods of the run and who owns what |
 | `crates/forma-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
 | `crates/forma-ui` | The theme engine, icons, fonts, widgets, the settings window and its pages, Find Action, theme tools |
 | `crates/forma-ui/icons/lucide/` | The Lucide icons used by the app and their license |
@@ -247,6 +255,13 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 - **Несколько запусков одновременно:** например, клиент и сервер для проверки мультиплеера, каждый в своей вкладке лога.
 - **Умная консоль** раскладывает каждую строку по серьёзности, системе игры и происхождению, с фильтрами и поиском. Чужие кадры стек-трейсов свёрнуты.
 - **Окно исключений** собирает все проблемы всех запусков, со счётчиками повторов и группировкой. Щелчок по кадру открывает нужную строку в твоём коде или в исходниках Minecraft и NeoForge.
+  - У каждой проблемы есть владелец, то есть чья она, и тот, через кого она всплыла: сломанная текстура Steam 'n' Rails показывается как «Create: Steam 'n' Rails (railways) через Minecraft».
+  - Моды показаны с названиями и логотипами. Плашка своего мода салатовая.
+  - Сообщения размечены: id ресурсов окрашены цветом владельца, недопустимые символы в id подсвечены, классы и файлы выделены.
+  - Объяснение простыми словами строится по самой глубокой причине в цепочке, а не по обёртке сверху.
+- **Моды запуска** — всё, что попадает в игру: свой мод, Minecraft и загрузчик, чужие моды из Gradle и `run/mods`, моды внутри других jar и библиотеки.
+  - У каждого мода видны логотип, версия, откуда он взялся, его зависимости и конфигурации миксинов.
+  - Проблемы считаются по модам. Недостающая обязательная зависимость или мод, лежащий в запуске дважды, отмечаются ещё до того, как игра упадёт.
 
 **Помогает писать код**
 - **Редактор кода** с подсветкой и автосохранением.
@@ -293,8 +308,8 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
    - ✅ набор SVG-значков, которые темы могут заменять и перекрашивать, и инструменты для авторов тем;
    - ✅ плагины: менеджер плагинов, jdtls как необязательный плагин, наборы тем;
    - скрипты на Python и новые окна из плагинов.
-4. **Hyphae, движок знаний.** Он понимает весь мод:
-   - к какому моду относится каждый класс, ресурс и строка лога;
+4. 🔧 **Hyphae, движок знаний (в работе, см. [docs/hyphae.md](docs/hyphae.md#русский)).** Он понимает весь мод:
+   - ✅ моды запуска и к какому моду относится каждый класс, ресурс и строка лога;
    - стороны клиента и сервера, потоки, этапы загрузки;
    - миксины и их цели;
    - что изменилось между версиями Minecraft и NeoForge и как переносить код.
@@ -363,6 +378,7 @@ cargo test
 | `crates/mycelium` | Приложение: окно, меню, рабочие пространства, редакторы, запуск, клиент jdtls, Discord |
 | `crates/mycelium-project` | Проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
 | `crates/mycelium-log` | Разбор и классификация логов игры, Gradle и компиляторов |
+| `crates/mycelium-hyphae` | Hyphae, движок знаний: jar, метаданные модов, вложенные jar, моды запуска и кому что принадлежит |
 | `crates/forma-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
 | `crates/forma-ui` | Движок тем, значки, шрифты, виджеты, окно настроек и его страницы, «Найти действие», инструменты для тем |
 | `crates/forma-ui/icons/lucide/` | Значки Lucide, которые использует программа, и их лицензия |

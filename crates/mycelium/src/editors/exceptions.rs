@@ -47,6 +47,17 @@ impl Default for ExceptionsView {
     }
 }
 
+impl ExceptionsView {
+    /// Выбирает проблему и раскрывает группы, чтобы она была видна в списке.
+    pub fn select(&mut self, signature: &str) {
+        self.selected = Some(signature.to_owned());
+        self.collapsed.clear();
+        // Фильтры могли бы спрятать выбранную проблему.
+        self.only_own = false;
+        self.only_errors = false;
+    }
+}
+
 /// Серьёзность для сортировки: краш, ошибка, предупреждение.
 fn severity(p: &Problem) -> u8 {
     if p.sample.crash {

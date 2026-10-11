@@ -2,8 +2,10 @@
 //! объяснения известных проблем и стек-трейс, в котором чужие кадры свёрнуты.
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
-use eframe::egui::{self, Color32, CornerRadius, CursorIcon, FontId, RichText, Sense, Stroke, Ui, vec2};
+use eframe::egui::{self, Color32, CornerRadius, CursorIcon, FontId, RichText, Sense, Stroke, Ui, text::LayoutJob, text::TextFormat, vec2};
+use regex::Regex;
 use forma_i18n::t;
 use mycelium_log::{Entry, Frame, Known, Level, System, Throwable};
 use mycelium_project::{Libraries, Origin};
@@ -27,7 +29,14 @@ pub fn origin_color(_pal: &Palette, origin: &Origin) -> Color32 {
     }
 }
 
+/// Подпись происхождения. У модов — «Название (id)», если мод есть среди модов запуска.
 pub fn origin_label(origin: &Origin) -> String {
+    if let Some(id) = crate::mods_view::mod_id(origin) {
+        let label = crate::mods_view::mod_label(&id);
+        if label != id {
+            return label;
+        }
+    }
     match origin {
         Origin::OwnMod => t!("origin-own"),
         Origin::Minecraft => "Minecraft".to_owned(),
@@ -99,6 +108,9 @@ pub fn known_title(k: Known) -> String {
         Known::ConcurrentModification => t!("known-concurrent-modification-title"),
         Known::CompileError => t!("known-compile-error-title"),
         Known::BuildFailed => t!("known-build-failed-title"),
+        Known::ObjMaterial => t!("known-obj-material-title"),
+        Known::ObjFile => t!("known-obj-file-title"),
+        Known::InvalidResourcePath => t!("known-invalid-path-title"),
     }
 }
 
@@ -121,6 +133,9 @@ pub fn known_explain(k: Known) -> String {
         Known::ConcurrentModification => t!("known-concurrent-modification-explain"),
         Known::CompileError => t!("known-compile-error-explain"),
         Known::BuildFailed => t!("known-build-failed-explain"),
+        Known::ObjMaterial => t!("known-obj-material-explain"),
+        Known::ObjFile => t!("known-obj-file-explain"),
+        Known::InvalidResourcePath => t!("known-invalid-path-explain"),
     }
 }
 
@@ -162,6 +177,37 @@ pub fn chip(ui: &mut Ui, pal: &Palette, color: Color32, text: &str) {
     }
 }
 
+/// Плашка происхождения. У мода — «Название (id)» и его логотип: свой мод салатовый,
+/// чужие — одного цвета и различаются логотипом. У остальных — цветная точка, как у [`chip`].
+pub fn origin_tag(ui: &mut Ui, pal: &Palette, origin: &Origin) -> egui::Response {
+    let id = crate::mods_view::mod_id(origin);
+    let color = match origin {
+        Origin::OwnMod => crate::colors::current().tag_own,
+        o => origin_color(pal, o),
+    };
+    let label = origin_label(origin);
+    let logo = id.as_deref().and_then(crate::mods_view::logo);
+    let font = FontId::proportional(11.5);
+    let lead = if logo.is_some() { 21.0 } else { 16.0 };
+    let max = (ui.max_rect().width() - lead - 6.0).max(24.0);
+    let galley = forma_ui::widgets::elide(ui, label.clone(), font, pal.text_muted, max);
+    let elided = galley.elided;
+    let (rect, resp) = ui.allocate_exact_size(galley.size() + vec2(lead + 6.0, 6.0), Sense::hover());
+    let painter = ui.painter();
+    painter.rect(rect, CornerRadius::same(9), color.gamma_multiply(0.14), Stroke::new(1.0, color.gamma_multiply(if id.is_some() { 0.45 } else { 0.0 })), egui::StrokeKind::Inside);
+    match &logo {
+        Some(tex) => {
+            let r = egui::Rect::from_center_size(rect.left_center() + vec2(11.0, 0.0), vec2(14.0, 14.0));
+            painter.image(tex.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        None => {
+            painter.circle_filled(rect.left_center() + vec2(9.0, 0.0), 3.5, color);
+        }
+    }
+    painter.galley(rect.left_top() + vec2(lead, 3.0), galley, pal.text_muted);
+    if elided { resp.on_hover_text(label) } else { resp }
+}
+
 /// Подробности записи: плашки, сообщение, объяснение и стек-трейс.
 /// `expanded` — какие свёрнутые группы кадров раскрыты.
 pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Libraries>, expanded: &mut HashSet<(u64, usize, usize)>, cmds: &mut Vec<Cmd>) {
@@ -169,7 +215,12 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
         let lvl = if e.crash { "CRASH" } else { level_tag(e.level) };
         chip(ui, pal, level_color(pal, e.level), lvl);
         chip(ui, pal, pal.text_faint, &system_label(e.system));
-        chip(ui, pal, origin_color(pal, &e.origin), &origin_label(&e.origin));
+        // Две роли: чья проблема и через кого она всплыла.
+        origin_tag(ui, pal, &e.origin).on_hover_text(t!("problem-owner-hint"));
+        if let Some(via) = &e.via {
+            ui.label(RichText::new(t!("problem-via")).size(11.5).color(pal.text_faint));
+            origin_tag(ui, pal, via).on_hover_text(t!("problem-via-hint"));
+        }
         // Время и поток — одной подписью: длинное имя потока не раздвигает узкую область,
         // а обрезается (целиком оно во всплывающей подсказке).
         let when: Vec<&str> = [e.time.as_deref(), e.thread.as_deref()].into_iter().flatten().collect();
@@ -194,9 +245,10 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
     }
 
     let mono = FontId::monospace(12.5);
-    ui.add(egui::Label::new(RichText::new(&e.message).font(mono.clone()).color(pal.heading)).wrap());
+    let bad_ids = matches!(e.known, Some(Known::InvalidResourceLocation | Known::InvalidResourcePath));
+    ui.add(egui::Label::new(message_job(&e.message, mono.clone(), pal.heading, pal, bad_ids)).wrap());
     for d in &e.details {
-        ui.add(egui::Label::new(RichText::new(d).font(mono.clone()).color(pal.text_muted)).wrap());
+        ui.add(egui::Label::new(message_job(d, mono.clone(), pal.text_muted, pal, bad_ids)).wrap());
     }
     if let Some(loc) = &e.location {
         let text = format!("{}:{}", loc.file, loc.line);
@@ -213,6 +265,89 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
     if let Some(t) = &e.throwable {
         ui.add_space(6.0);
         throwable(ui, pal, e.seq, t, libs, expanded, cmds);
+    }
+}
+
+/// Id ресурса: `пространство:путь`. Путь — до пробела, кавычки или скобки: в неправильном
+/// id бывают и заглавные буквы, и пробелы не бывают.
+static RESOURCE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b([a-z][a-z0-9_.-]*):([^\s'\x22,;()\[\]{}<>]+)").expect("регулярное выражение id"));
+/// Полное имя класса: `net.minecraft.world.item.Item`, `com.example.Foo$Bar`.
+static CLASS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:[a-z_][a-z0-9_]*\.){2,}[A-Z][A-Za-z0-9_$]*").expect("регулярное выражение класса"));
+/// Файл: путь с расширением ресурса, кода или архива.
+static FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\w./\\-]+\.(?:json|png|obj|mtl|toml|java|kt|ogg|class|jar|mcmeta|nbt|cfg|properties)\b").expect("регулярное выражение файла"));
+
+/// Сообщение с разметкой: у id ресурса пространство имён окрашено цветом его владельца,
+/// классы — цветом происхождения, файлы подчёркнуты. `bad_ids` — подсветить в путях id
+/// недопустимые символы (всё, кроме `a-z 0-9 / . _ -`).
+pub fn message_job(text: &str, font: FontId, base: Color32, pal: &Palette, bad_ids: bool) -> LayoutJob {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Resource,
+        Class,
+        File,
+    }
+    let mut spans: Vec<(usize, usize, Kind)> = Vec::new();
+    for m in RESOURCE.find_iter(text) {
+        // `https://…` — адрес, а не id.
+        if !m.as_str().contains("://") {
+            spans.push((m.start(), m.end(), Kind::Resource));
+        }
+    }
+    for (re, kind) in [(&*CLASS, Kind::Class), (&*FILE, Kind::File)] {
+        for m in re.find_iter(text) {
+            if !spans.iter().any(|(a, b, _)| m.start() < *b && *a < m.end()) {
+                spans.push((m.start(), m.end(), kind));
+            }
+        }
+    }
+    spans.sort_by_key(|s| s.0);
+    let rules = crate::mods_view::rules();
+    let plain = TextFormat::simple(font.clone(), base);
+    let mut job = LayoutJob::default();
+    let mut at = 0;
+    for (start, end, kind) in spans {
+        job.append(&text[at..start], 0.0, plain.clone());
+        let token = &text[start..end];
+        match kind {
+            Kind::Resource => {
+                let (ns, path) = token.split_once(':').unwrap_or((token, ""));
+                let ns_color = origin_color(pal, &rules.namespace(ns));
+                job.append(ns, 0.0, TextFormat { color: ns_color, ..plain.clone() });
+                job.append(":", 0.0, TextFormat::simple(font.clone(), pal.text_faint));
+                if bad_ids {
+                    // Недопустимые символы пути — красным и подчёркнутыми.
+                    for c in path.chars() {
+                        let ok = c.is_ascii_lowercase() || c.is_ascii_digit() || "/._-#".contains(c);
+                        let fmt = if ok { plain.clone() } else { TextFormat { color: pal.danger, underline: Stroke::new(1.0, pal.danger), background: pal.danger.gamma_multiply(0.15), ..plain.clone() } };
+                        job.append(&c.to_string(), 0.0, fmt);
+                    }
+                } else {
+                    job.append(path, 0.0, plain.clone());
+                }
+            }
+            Kind::Class => {
+                let color = origin_color(pal, &rules.class(token.trim_end_matches(['.', '$'])));
+                job.append(token, 0.0, TextFormat { color, ..plain.clone() });
+            }
+            Kind::File => {
+                job.append(token, 0.0, TextFormat { underline: Stroke::new(1.0, base.gamma_multiply(0.5)), ..plain.clone() });
+            }
+        }
+        at = end;
+    }
+    job.append(&text[at..], 0.0, plain);
+    job
+}
+
+/// Текст и оформление кусков разметки — чтобы приклеить одну разметку к другой.
+trait SectionsText {
+    fn sections_text(&self) -> Vec<(String, TextFormat)>;
+}
+
+impl SectionsText for LayoutJob {
+    fn sections_text(&self) -> Vec<(String, TextFormat)> {
+        self.sections.iter().map(|s| (self.text[s.byte_range.start.0..s.byte_range.end.0].to_owned(), s.format.clone())).collect()
     }
 }
 
@@ -246,11 +381,15 @@ fn note(ui: &mut Ui, pal: &Palette, icon: &str, title: &str, text: &str, tint: C
 pub fn throwable(ui: &mut Ui, pal: &Palette, seq: u64, t: &Throwable, libs: Option<&Libraries>, expanded: &mut HashSet<(u64, usize, usize)>, cmds: &mut Vec<Cmd>) {
     let mono = FontId::monospace(12.0);
     for (ci, cause) in t.chain().enumerate() {
-        let head = match &cause.message {
-            Some(m) => format!("{}{}: {m}", if ci > 0 { "Caused by: " } else { "" }, cause.type_name),
-            None => format!("{}{}", if ci > 0 { "Caused by: " } else { "" }, cause.type_name),
-        };
-        ui.add(egui::Label::new(RichText::new(head).font(mono.clone()).color(pal.danger)).wrap());
+        let prefix = format!("{}{}", if ci > 0 { "Caused by: " } else { "" }, cause.type_name);
+        let mut head = LayoutJob::single_section(prefix, TextFormat::simple(mono.clone(), pal.danger));
+        if let Some(m) = &cause.message {
+            head.append(": ", 0.0, TextFormat::simple(mono.clone(), pal.danger));
+            for s in message_job(m, mono.clone(), pal.danger, pal, false).sections_text() {
+                head.append(&s.0, 0.0, s.1);
+            }
+        }
+        ui.add(egui::Label::new(head).wrap());
         let mut i = 0;
         while i < cause.frames.len() {
             let f = &cause.frames[i];

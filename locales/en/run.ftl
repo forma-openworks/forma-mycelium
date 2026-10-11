@@ -56,13 +56,13 @@ exceptions-severity-error = Errors
 exceptions-severity-warning = Warnings
 exceptions-type-error = Errors in the log
 exceptions-type-warning = Warnings in the log
-exceptions-noise-group = Harmless Minecraft noise
-exceptions-noise-hint = Warnings the game and the loader print on every run in a development environment. They have nothing to do with your mod.
+exceptions-noise-group = Harmless noise
+exceptions-noise-hint = Warnings the game, the loader and other mods print on every run in a development environment. They have nothing to do with your mod.
 exceptions-only-noise = No real problems — only harmless noise.
 
 noise-tag = noise
 noise-title = Harmless noise
-noise-explain = Minecraft or the loader prints this warning on every run in a development environment, with any mod. There is nothing to fix in your code — it's safe to skip.
+noise-explain = Minecraft, the loader or another mod prints this warning on every run in a development environment, with any mod. There is nothing to fix in your code — it's safe to skip.
 
 frame-open-library-source = Open source (read-only)
 frame-open-source = Open source
@@ -119,3 +119,7 @@ runcfg-task = Gradle tasks
 runcfg-args = Gradle arguments
 runcfg-reset = Restore the original
 runcfg-saved-in = Stored in .mycelium/runs.json — fine to commit to git.
+
+problem-via = via
+problem-owner-hint = Whose problem it is: who should fix it
+problem-via-hint = Who noticed or reported it

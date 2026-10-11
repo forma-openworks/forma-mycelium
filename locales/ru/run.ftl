@@ -57,13 +57,13 @@ exceptions-severity-error = Ошибки
 exceptions-severity-warning = Предупреждения
 exceptions-type-error = Ошибки в логе
 exceptions-type-warning = Предупреждения в логе
-exceptions-noise-group = Безобидный шум Minecraft
-exceptions-noise-hint = Предупреждения, которые игра и загрузчик пишут при каждом запуске в среде разработки. К вашему моду они отношения не имеют.
+exceptions-noise-group = Безобидный шум
+exceptions-noise-hint = Предупреждения, которые игра, загрузчик и другие моды пишут при каждом запуске в среде разработки. К вашему моду они отношения не имеют.
 exceptions-only-noise = Настоящих проблем нет — только безобидный шум.
 
 noise-tag = шум
 noise-title = Безобидный шум
-noise-explain = Это предупреждение Minecraft или загрузчик пишут при каждом запуске в среде разработки, с любым модом. Исправлять в своём коде нечего — его можно спокойно пропустить.
+noise-explain = Это предупреждение Minecraft, загрузчик или другой мод пишут при каждом запуске в среде разработки, с любым модом. Исправлять в своём коде нечего — его можно спокойно пропустить.
 
 frame-open-library-source = Открыть исходник (только чтение)
 frame-open-source = Открыть исходник
@@ -122,3 +122,7 @@ runcfg-task = Задачи Gradle
 runcfg-args = Аргументы Gradle
 runcfg-reset = Вернуть как было
 runcfg-saved-in = Хранится в .mycelium/runs.json — можно класть в git.
+
+problem-via = через
+problem-owner-hint = Чья это проблема: кому её исправлять
+problem-via-hint = Кто её заметил или сообщил о ней
