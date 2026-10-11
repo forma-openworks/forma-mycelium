@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use eframe::egui::{self, Align2, CornerRadius, CursorIcon, FontId, RichText, Sense, Stroke, Ui, vec2};
+use eframe::egui::{self, Align2, CornerRadius, CursorIcon, FontId, Sense, Stroke, Ui, vec2};
 use forma_i18n::t;
 use mycelium_log::{Entry, Level};
 use mycelium_project::Libraries;
@@ -125,33 +125,55 @@ fn fmt_time(s: f64) -> String {
 pub fn run_bar(ui: &mut Ui, _pal: &Palette, console: &Console, configs: &[RunConfig], selected: &mut Option<String>, combo: Option<f32>, cmds: &mut Vec<Cmd>) {
     let current = configs.iter().find(|c| Some(&c.id) == selected.as_ref()).or(configs.first());
     if let Some(width) = combo {
-        let label = current.map(|c| format!("{}  {}", c.kind.icon(), c.label())).unwrap_or_else(|| t!("run-no-configs"));
-        egui::ComboBox::from_id_salt("mycelium-run-config").selected_text(label).truncate().width(width).show_ui(ui, |ui| {
-            for c in configs {
-                let running = console.is_running_config(&c.id);
-                let text = format!("{}  {}{}", c.kind.icon(), c.label(), if running { "  ●" } else { "" });
-                if ui.selectable_label(Some(&c.id) == selected.as_ref(), text).on_hover_text(c.command_line()).clicked() {
-                    *selected = Some(c.id.clone());
-                }
-            }
-            ui.separator();
-            if ui.button(format!("✎  {}", t!("run-edit-configs"))).clicked() {
-                cmds.push(Cmd::EditRunConfigs);
-            }
-        });
+        config_picker(ui, console, configs, selected, current, width, cmds);
     }
     let running = current.is_some_and(|c| console.is_running_config(&c.id));
     let rc = crate::colors::current();
-    let (glyph, color, hint) = if running { ("⟲", rc.run_running, t!("run-restart")) } else { ("▶", rc.run_ok, format!("{} (Shift+F10)", t!("run-start"))) };
-    if ui.add_enabled(current.is_some(), egui::Button::new(RichText::new(glyph).color(color))).on_hover_text(hint).clicked() {
+    let (icon, color, hint) = if running { ("restart", rc.run_running, t!("run-restart")) } else { ("run", rc.run_ok, format!("{} (Shift+F10)", t!("run-start"))) };
+    if ui.add_enabled_ui(current.is_some(), |ui| forma_ui::icons::colored_button(ui, icon, color)).inner.on_hover_text(hint).clicked() {
         cmds.push(Cmd::Run);
     }
-    if running && ui.add(egui::Button::new(RichText::new("■").color(rc.run_failed))).on_hover_text(format!("{} (Ctrl+F2)", t!("run-stop"))).clicked() {
+    if running && forma_ui::icons::colored_button(ui, "stop", rc.run_failed).on_hover_text(format!("{} (Ctrl+F2)", t!("run-stop"))).clicked() {
         cmds.push(Cmd::Stop);
     }
-    if console.running().count() > 1 && ui.button(RichText::new("■■").color(rc.run_failed)).on_hover_text(t!("run-stop-all")).clicked() {
+    if console.running().count() > 1 && forma_ui::icons::colored_button(ui, "stop-all", rc.run_failed).on_hover_text(t!("run-stop-all")).clicked() {
         cmds.push(Cmd::StopAll);
     }
+}
+
+/// Выбор конфигурации запуска: значок вида, название и стрелка; в меню — все конфигурации
+/// (идущие помечены точкой) и «Изменить конфигурации…».
+fn config_picker(ui: &mut Ui, console: &Console, configs: &[RunConfig], selected: &mut Option<String>, current: Option<&RunConfig>, width: f32, cmds: &mut Vec<Cmd>) {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, ui.spacing().interact_size.y), Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
+    let v = if open { ui.visuals().widgets.open } else { *ui.style().interact(&resp) };
+    let painter = ui.painter();
+    painter.rect(rect, v.corner_radius, v.weak_bg_fill, v.bg_stroke, egui::StrokeKind::Inside);
+    let pad = ui.spacing().button_padding.x;
+    let mut x = rect.left() + pad;
+    if let Some(c) = current {
+        forma_ui::icons::paint(painter, egui::Rect::from_center_size(egui::pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0)), c.kind.icon(), v.fg_stroke.color);
+        x += 20.0;
+    }
+    let arrow = egui::Rect::from_center_size(egui::pos2(rect.right() - pad - 6.0, rect.center().y), vec2(12.0, 12.0));
+    let label = current.map(|c| c.label()).unwrap_or_else(|| t!("run-no-configs"));
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let g = forma_ui::widgets::elide(ui, label, font, v.fg_stroke.color, arrow.left() - 4.0 - x);
+    ui.painter().galley(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, v.fg_stroke.color);
+    forma_ui::icons::paint(ui.painter(), arrow, "chevron-down", v.fg_stroke.color);
+    egui::Popup::menu(&resp).style(forma_ui::theme::menu_style).show(|ui| {
+        for c in configs {
+            let running = console.is_running_config(&c.id);
+            let text = if running { format!("{}  ●", c.label()) } else { c.label() };
+            if forma_ui::icons::item(ui, c.kind.icon(), text, Some(&c.id) == selected.as_ref()).on_hover_text(c.command_line()).clicked() {
+                *selected = Some(c.id.clone());
+            }
+        }
+        ui.separator();
+        if forma_ui::icons::item(ui, "edit", t!("run-edit-configs"), false).clicked() {
+            cmds.push(Cmd::EditRunConfigs);
+        }
+    });
 }
 
 fn status_text(pal: &Palette, s: &Session, now: f64) -> (String, egui::Color32) {
@@ -180,29 +202,30 @@ fn session_tabs(ui: &mut Ui, pal: &Palette, console: &Console, shown: Option<u64
                 Status::Stopped { .. } => (pal.text_faint, String::new()),
                 _ => (pal.danger, String::new()),
             };
-            let label = format!("{}  {}", s.config.kind.icon(), s.config.label());
             let font = FontId::proportional(12.5);
             let tg = ui.painter().layout_no_wrap(time.clone(), FontId::proportional(11.5), pal.text_faint);
             let close_w = if s.is_running() { 0.0 } else { 16.0 };
             // Вкладка не шире ряда: длинное название обрезается.
-            let fixed = 22.0 + if time.is_empty() { 0.0 } else { tg.size().x + 8.0 } + close_w + 10.0;
-            let g = forma_ui::widgets::elide(ui, label, font.clone(), pal.text, ui.max_rect().width() - 6.0 - fixed);
-            let w = 22.0 + g.size().x + if time.is_empty() { 0.0 } else { tg.size().x + 8.0 } + close_w + 10.0;
+            let fixed = 38.0 + if time.is_empty() { 0.0 } else { tg.size().x + 8.0 } + close_w + 10.0;
+            let g = forma_ui::widgets::elide(ui, s.config.label(), font.clone(), pal.text, ui.max_rect().width() - 6.0 - fixed);
+            let w = fixed + g.size().x;
             let (rect, resp) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
             let fill = if active { pal.accent_soft } else if resp.hovered() { pal.bg_hover } else { pal.bg_header.gamma_multiply(0.6) };
             ui.painter().rect(rect, CornerRadius::same(7), fill, Stroke::new(1.0, if active { pal.accent.gamma_multiply(0.5) } else { pal.border }), egui::StrokeKind::Inside);
             ui.painter().circle_filled(rect.left_center() + vec2(11.0, 0.0), 3.5, dot);
-            let text_pos = rect.left_center() + vec2(20.0, -g.size().y / 2.0);
+            let text_color = if active { pal.heading } else { pal.text };
+            forma_ui::icons::paint(ui.painter(), egui::Rect::from_center_size(rect.left_center() + vec2(26.0, 0.0), vec2(14.0, 14.0)), s.config.kind.icon(), text_color);
+            let text_pos = rect.left_center() + vec2(38.0, -g.size().y / 2.0);
             let gw = g.size().x;
-            ui.painter().galley(text_pos, g, if active { pal.heading } else { pal.text });
+            ui.painter().galley(text_pos, g, text_color);
             if !time.is_empty() {
-                ui.painter().galley(rect.left_center() + vec2(28.0 + gw, -tg.size().y / 2.0), tg, pal.text_faint);
+                ui.painter().galley(rect.left_center() + vec2(46.0 + gw, -tg.size().y / 2.0), tg, pal.text_faint);
             }
             let mut closed = false;
             if !s.is_running() {
                 let x = close_rect(rect);
                 let hover = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| x.contains(p));
-                ui.painter().text(x.center(), Align2::CENTER_CENTER, "×", FontId::proportional(13.0), if hover { pal.heading } else { pal.text_faint });
+                forma_ui::icons::paint(ui.painter(), x.shrink(2.0), "close", if hover { pal.heading } else { pal.text_faint });
                 if resp.clicked() && hover {
                     cmds.push(Cmd::CloseSession(s.id));
                     closed = true;
@@ -233,10 +256,10 @@ fn session_tabs(ui: &mut Ui, pal: &Palette, console: &Console, shown: Option<u64
 /// Фильтры узкой консоли — в меню «⋯». Кнопка подсвечена, если какой-то фильтр включён.
 fn filters_menu(ui: &mut Ui, view: &mut ConsoleView, shown: Option<u64>, levels: &[(LevelFilter, &str, String)], cleared: &mut Option<u64>) {
     let active = view.level != LevelFilter::All || view.only_problems || view.only_own;
-    let more = ui.add(egui::Button::new("⋯").selected(active)).on_hover_text(t!("console-filters"));
+    let more = forma_ui::icons::button(ui, "filter", active).on_hover_text(t!("console-filters"));
     egui::Popup::menu(&more).style(forma_ui::theme::menu_style).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-        for (f, glyph, label) in levels.iter().rev() {
-            if ui.add(egui::Button::new(format!("{glyph}  {label}")).selected(view.level == *f)).clicked() {
+        for (f, icon, label) in levels.iter().rev() {
+            if forma_ui::icons::item(ui, icon, label.as_str(), view.level == *f).clicked() {
                 view.level = *f;
             }
         }
@@ -247,12 +270,12 @@ fn filters_menu(ui: &mut Ui, view: &mut ConsoleView, shown: Option<u64>, levels:
         if ui.add(egui::Button::new(t!("console-only-own")).selected(view.only_own)).clicked() {
             view.only_own = !view.only_own;
         }
-        if ui.add(egui::Button::new(format!("⇩  {}", t!("console-autoscroll"))).selected(view.autoscroll)).clicked() {
+        if forma_ui::icons::item(ui, "scroll-down", t!("console-autoscroll"), view.autoscroll).clicked() {
             view.autoscroll = !view.autoscroll;
         }
         if let Some(id) = shown {
             ui.separator();
-            if ui.button(format!("🗑  {}", t!("console-clear"))).clicked() {
+            if forma_ui::icons::item(ui, "trash", t!("console-clear"), false).clicked() {
                 *cleared = Some(id);
                 ui.close();
             }
@@ -280,7 +303,7 @@ pub fn ui(
     cmds: &mut Vec<Cmd>,
 ) {
     if !has_project {
-        super::empty_state(ui, pal, "🖥", &t!("console-no-project-title"), &t!("console-no-project-hint"));
+        super::empty_state(ui, pal, "editor-console", &t!("console-no-project-title"), &t!("console-no-project-hint"));
         return;
     }
     let session = view.pick(console);
@@ -291,17 +314,19 @@ pub fn ui(
     ui.add_space(4.0);
     let bar_id = ui.id().with("mycelium-console-bar");
     let levels = [
-        (LevelFilter::Error, "✖", t!("console-level-error")),
-        (LevelFilter::Warn, "⚠", t!("console-level-warn")),
-        (LevelFilter::Info, "ℹ", t!("console-level-info")),
-        (LevelFilter::All, "∗", t!("console-level-all")),
+        (LevelFilter::Error, "error", t!("console-level-error")),
+        (LevelFilter::Warn, "warning", t!("console-level-warn")),
+        (LevelFilter::Info, "info", t!("console-level-info")),
+        (LevelFilter::All, "all", t!("console-level-all")),
     ];
     let (only_own, only_problems) = (t!("console-only-own"), t!("console-only-problems"));
     let bw = forma_ui::widgets::button_width;
+    // Ширина всех фильтров в строку: шесть кнопок-значков, две с подписью и поиск.
     let filters_w = 12.0
         + 150.0
-        + [bw(ui, "🗑", 0.0), bw(ui, "⇩", 0.0), bw(ui, &only_own, 0.0), bw(ui, &only_problems, 0.0)].iter().sum::<f32>()
-        + levels.iter().map(|(_, glyph, _)| bw(ui, glyph, 0.0)).sum::<f32>()
+        + bw(ui, &only_own, 0.0)
+        + bw(ui, &only_problems, 0.0)
+        + 6.0 * ui.spacing().interact_size.y
         + ui.spacing().item_spacing.x * 9.0;
     let compact = ui.available_width() < filters_w;
     let mut cleared = None;
@@ -325,11 +350,11 @@ pub fn ui(
                 filters_menu(ui, view, shown, &levels, &mut cleared);
             } else {
                 if let Some(id) = shown {
-                    if ui.button("🗑").on_hover_text(t!("console-clear")).clicked() {
+                    if forma_ui::icons::button(ui, "trash", false).on_hover_text(t!("console-clear")).clicked() {
                         cleared = Some(id);
                     }
                 }
-                let auto = ui.add(egui::Button::new("⇩").selected(view.autoscroll)).on_hover_text(t!("console-autoscroll"));
+                let auto = forma_ui::icons::button(ui, "scroll-down", view.autoscroll).on_hover_text(t!("console-autoscroll"));
                 if auto.clicked() {
                     view.autoscroll = !view.autoscroll;
                 }
@@ -339,15 +364,15 @@ pub fn ui(
                 if ui.add(egui::Button::new(&only_problems).selected(view.only_problems)).clicked() {
                     view.only_problems = !view.only_problems;
                 }
-                for (f, glyph, hint) in &levels {
-                    if ui.add(egui::Button::new(*glyph).selected(view.level == *f)).on_hover_text(hint).clicked() {
+                for (f, icon, hint) in &levels {
+                    if forma_ui::icons::button(ui, icon, view.level == *f).on_hover_text(hint).clicked() {
                         view.level = *f;
                     }
                 }
             }
             // Поиск берёт то, что осталось в строке, а не ширину целой строки.
             let width = (ui.available_size_before_wrap().x - 2.0).clamp(60.0, 150.0);
-            ui.add(egui::TextEdit::singleline(&mut view.search).id(bar_id.with("search")).hint_text(t!("console-search")).desired_width(width));
+            forma_ui::widgets::search_field(ui, bar_id.with("search"), &mut view.search, &t!("console-search"), width, 12.5);
         },
     );
     if let Some(id) = cleared {
@@ -361,7 +386,7 @@ pub fn ui(
     ui.add_space(3.0);
 
     let Some(session) = session else {
-        super::empty_state(ui, pal, "🖥", &t!("console-empty-title"), &t!("console-empty-hint"));
+        super::empty_state(ui, pal, "editor-console", &t!("console-empty-title"), &t!("console-empty-hint"));
         return;
     };
     let rows: Vec<usize> = view.filtered(session).to_vec();
@@ -371,7 +396,7 @@ pub fn ui(
         } else {
             (t!("console-filtered-title"), t!("console-filtered-hint"))
         };
-        super::empty_state(ui, pal, "🖥", &title, &hint);
+        super::empty_state(ui, pal, "editor-console", &title, &hint);
         return;
     }
 

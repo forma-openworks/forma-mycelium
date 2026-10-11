@@ -313,8 +313,8 @@ pub fn hover(ui: &Ui, pal: &Palette, id: Id, doc: &Document, lsp: &mut JavaLsp, 
     egui::Tooltip::always_open(ctx.clone(), ui.layer_id(), id.with("hover-tip"), pointer).gap(12.0).show(|ui| {
         ui.set_max_width(520.0);
         if let Some((sev, msg)) = &diag {
-            let icon = if *sev == Severity::Error { "✖" } else { "⚠" };
-            ui.label(RichText::new(format!("{icon} {msg}")).color(severity_color(pal, *sev)));
+            let icon = if *sev == Severity::Error { "error" } else { "warning" };
+            forma_ui::widgets::icon_label(ui, icon, msg.as_str(), 13.0, severity_color(pal, *sev));
         }
         if let Some(text) = info.filter(|_| still) {
             if diag.is_some() {

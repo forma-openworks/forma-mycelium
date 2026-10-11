@@ -75,14 +75,15 @@ impl EditorKind {
         }
     }
 
+    /// Имя значка (см. `forma_ui::icons`).
     pub fn icon(self) -> &'static str {
         match self {
-            EditorKind::Project => "📁",
-            EditorKind::Code => "📝",
-            EditorKind::ModMap => "🕸",
-            EditorKind::Exceptions => "⚠",
-            EditorKind::Console => "🖥",
-            EditorKind::ModelPreview => "🎲",
+            EditorKind::Project => "editor-project",
+            EditorKind::Code => "editor-code",
+            EditorKind::ModMap => "editor-map",
+            EditorKind::Exceptions => "editor-exceptions",
+            EditorKind::Console => "editor-console",
+            EditorKind::ModelPreview => "editor-model",
         }
     }
 
@@ -257,8 +258,7 @@ impl TabViewer for Editors<'_> {
     fn add_menu(&mut self, ui: &mut Ui) -> Option<EditorTab> {
         let mut picked = None;
         for kind in EditorKind::ALL {
-            let text = RichText::new(format!("{}  {}", kind.icon(), kind.title()));
-            if ui.button(text).clicked() {
+            if forma_ui::icons::item(ui, kind.icon(), kind.title(), false).clicked() {
                 picked = Some(EditorTab::new(kind, self.next_tab_id));
             }
         }
@@ -302,11 +302,17 @@ fn centered_scroll(ui: &mut Ui, add: impl FnOnce(&mut Ui, f32)) {
     });
 }
 
+/// Крупный значок по центру строки (в пустых состояниях и заглушках).
+pub fn big_icon(ui: &mut Ui, name: &str, size: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    forma_ui::icons::paint(ui.painter(), rect, name, color);
+}
+
 /// Пустое состояние редактора: значок, заголовок, подсказка.
 pub fn empty_state(ui: &mut Ui, pal: &Palette, icon: &str, title: &str, hint: &str) {
     centered_scroll(ui, |ui, height| {
         ui.add_space((height * 0.3 - 50.0).max(12.0));
-        ui.label(RichText::new(icon).size(30.0).color(pal.text_faint));
+        big_icon(ui, icon, 30.0, pal.text_faint);
         ui.add_space(4.0);
         ui.label(RichText::new(title).size(15.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(2.0);
@@ -319,7 +325,7 @@ pub fn empty_state(ui: &mut Ui, pal: &Palette, icon: &str, title: &str, hint: &s
 fn placeholder(ui: &mut Ui, pal: &Palette, kind: EditorKind) {
     centered_scroll(ui, |ui, height| {
         ui.add_space((height * 0.3 - 70.0).max(12.0));
-        ui.label(RichText::new(kind.icon()).size(38.0).color(kind.color(pal)));
+        big_icon(ui, kind.icon(), 38.0, kind.color(pal));
         ui.add_space(6.0);
         ui.label(RichText::new(kind.title()).size(18.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(4.0);
@@ -344,7 +350,7 @@ fn badge(ui: &mut Ui, pal: &Palette, text: &str) {
 fn no_project(ui: &mut Ui, pal: &Palette, recent: &[PathBuf], cmds: &mut Vec<Cmd>) {
     centered_scroll(ui, |ui, height| {
         ui.add_space((height * 0.25 - 60.0).max(12.0));
-        ui.label(RichText::new(EditorKind::Project.icon()).size(34.0).color(pal.accent));
+        big_icon(ui, EditorKind::Project.icon(), 34.0, pal.accent);
         ui.add_space(4.0);
         ui.label(RichText::new(t!("project-none-title")).size(16.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(4.0);

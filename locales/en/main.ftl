@@ -42,6 +42,7 @@ workspace-rename = Rename…
 workspace-rename-title = Workspace name
 workspace-duplicate = Duplicate
 workspace-delete = Delete
+menu-compact = Menu
 workspace-more = { $count ->
     [one] { $count } more workspace
    *[other] { $count } more workspaces
@@ -137,4 +138,18 @@ action-group-window = Window
 action-group-editor = Code editor
 action-group-help = Help
 settings-component-fonts = Interface, editor and console fonts
+settings-component-plugins = Which plugins are installed and which are turned off
+plugin-jdtls-name = Java language server (jdtls)
+plugin-jdtls-about = Errors right in the code, completion, hover docs and go to definition for Java, including Minecraft sources.
+plugin-kotlin-name = Kotlin language server
+plugin-kotlin-about = The same help for mods written in Kotlin.
+plugin-python-name = Python
+plugin-python-about = Scripts and add-ons for Forma Mycelium, like in Blender.
+dialog-install-plugin = Install a plugin from disk
+toast-plugin-installed = Plugin installed: { $name }
+toast-plugin-failed = Plugin error: { $error }
+toast-plugin-install-failed = Couldn't install { $name }: { $error }
+theme-new-name = My theme
+toast-theme-created = Theme created: { $path }
+toast-theme-create-failed = Couldn't create the theme: { $error }
 action-quick-theme = Quick switch theme…

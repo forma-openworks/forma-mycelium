@@ -64,8 +64,14 @@ pub enum Cmd {
     Redetect,
     /// Заново выгрузить модель проекта из Gradle.
     SyncGradle,
-    /// Скачать и установить jdtls.
-    InstallJdtls,
+    /// Поставить плагин из каталога.
+    InstallPlugin(String),
+    /// Поставить плагин из `.zip` (спросить файл).
+    InstallPluginFile,
+    UninstallPlugin(String),
+    /// Открыть папку плагинов.
+    RevealPlugins,
+    /// Перезапустить jdtls (а если его нет — поставить).
     RestartJdtls,
     SaveAll,
     /// Запустить выбранную конфигурацию (уже идущую — перезапустить).
@@ -213,6 +219,8 @@ pub struct MyceliumApp {
     sync: GradleSync,
     /// Подсказки Java (jdtls) для открытого проекта.
     lsp: Option<JavaLsp>,
+    /// Установленные плагины и идущие установки.
+    plugins: forma_plugins::Plugins,
     states: EditorStates,
     /// Экран приветствия вместо рабочего интерфейса.
     welcome: bool,
@@ -272,7 +280,9 @@ impl MyceliumApp {
             o.quit_shortcuts.clear();
         });
         ctx.set_zoom_factor(settings.appearance.zoom.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
-        let themes = Themes::new(BUILTIN_THEMES, settings::user_themes_dir());
+        let plugins = crate::plugins::open();
+        let mut themes = Themes::new(BUILTIN_THEMES, settings::user_themes_dir());
+        themes.set_plugin_dirs(crate::plugins::theme_dirs(&plugins, &settings.plugins));
         let theme = themes.resolve(&settings.appearance.theme, DEFAULT_THEME, settings.appearance.accent);
         let pal = theme.pal.clone();
         // Шрифты нужны уже в первом кадре: egui применяет новые шрифты только со следующего.
@@ -317,6 +327,7 @@ impl MyceliumApp {
             console: Console::default(),
             sync: GradleSync::default(),
             lsp: None,
+            plugins,
             states: EditorStates::default(),
             welcome: true,
             modal: None,
@@ -416,7 +427,10 @@ impl MyceliumApp {
         self.sync.on_open(&project, now);
         // Подсказки Java: jdtls запускается сам, если установлен.
         self.lsp = (project.info.gradle && project.info.languages.contains(&mycelium_project::Language::Java))
-            .then(|| JavaLsp::new(&self.ctx, &project.root, project.model.as_ref().and_then(|m| m.jdk()).map(|j| j.home.clone())));
+            .then(|| {
+                let jdk = project.model.as_ref().and_then(|m| m.jdk()).map(|j| j.home.clone());
+                JavaLsp::new(&self.ctx, &project.root, jdk, crate::plugins::active_dir(&self.plugins, &self.settings.plugins, crate::plugins::JDTLS))
+            });
         if !self.configs.iter().any(|c| Some(&c.id) == self.view.run_config.as_ref()) {
             self.view.run_config = self.configs.first().map(|c| c.id.clone());
         }
@@ -692,16 +706,44 @@ impl MyceliumApp {
                         self.sync.start(p, now);
                     }
                 }
-                Cmd::InstallJdtls => {
-                    if let Some(l) = &mut self.lsp {
-                        l.install();
+                Cmd::InstallPlugin(id) => {
+                    if let Some(entry) = crate::plugins::entry(&id) {
+                        self.plugins.install(&entry);
                     }
                 }
-                Cmd::RestartJdtls => {
-                    if let Some(l) = &mut self.lsp {
-                        l.restart();
+                Cmd::InstallPluginFile => {
+                    let file = rfd::FileDialog::new().set_title(t!("dialog-install-plugin")).add_filter("zip", &["zip"]).pick_file();
+                    if let Some(file) = file {
+                        match self.plugins.install_file(&file) {
+                            Ok(id) => {
+                                let name = self.plugins.get(&id).map(|p| p.manifest.title().to_owned()).unwrap_or(id);
+                                self.toast(t!("toast-plugin-installed", name = name), false, now);
+                            }
+                            Err(e) => self.toast(t!("toast-plugin-failed", error = e), true, now),
+                        }
                     }
                 }
+                Cmd::UninstallPlugin(id) => {
+                    // Сначала отпускаем файлы плагина: jdtls останавливается.
+                    if id == crate::plugins::JDTLS {
+                        if let Some(l) = &mut self.lsp {
+                            l.set_server(None);
+                        }
+                    }
+                    if let Err(e) = self.plugins.uninstall(&id) {
+                        self.toast(t!("toast-plugin-failed", error = e), true, now);
+                    }
+                }
+                Cmd::RevealPlugins => {
+                    if let Some(root) = self.plugins.root() {
+                        let _ = std::fs::create_dir_all(root);
+                        open_folder(root);
+                    }
+                }
+                Cmd::RestartJdtls => match &mut self.lsp {
+                    Some(l) if l.has_server() => l.restart(),
+                    _ => self.cmds.push(Cmd::InstallPlugin(crate::plugins::JDTLS.into())),
+                },
                 Cmd::SaveAll => {
                     for err in self.docs.save_all() {
                         self.toast(err, true, now);
@@ -907,6 +949,7 @@ impl MyceliumApp {
             self.theme_gen += 1;
             crate::highlight::set_theme(&self.theme, self.theme_gen);
             crate::colors::set(self.theme.group(ModColors::TOKENS, ModColors::resolve));
+            forma_ui::icons::set_theme(&self.theme.icons, &self.theme.icon_colors);
             let text = key.max_keys.first().map(ToString::to_string).unwrap_or_default();
             self.dock_style = self.pal.dock_style(APP_TITLE, self.icon.clone(), key.max_keys.iter().map(Shortcut::to_egui).collect(), text);
             theme::apply(ctx, &self.pal, self.settings.fonts.ui.size);
@@ -940,6 +983,7 @@ impl MyceliumApp {
         if self.sync.is_busy() {
             ctx.request_repaint_after_secs(0.2);
         }
+        self.poll_plugins(ctx, now);
         self.poll_lsp(ctx, now);
         let (errors, waiting) = self.docs.autosave(now);
         for err in errors {
@@ -1002,6 +1046,45 @@ impl MyceliumApp {
             links: self.links.as_ref(),
         };
         self.presence.set(Some(discord::activity(&input)));
+    }
+
+    /// Установки плагинов: что поставилось или удалилось — к тому подключаются программа
+    /// (сервер Java, темы) и список плагинов в настройках (для экспорта).
+    fn poll_plugins(&mut self, ctx: &egui::Context, now: f64) {
+        if self.plugins.poll() {
+            ctx.request_repaint_after_secs(0.2);
+        }
+        for event in self.plugins.take_events() {
+            let title = |id: &str| crate::plugins::entry(id).map(|e| e.name).unwrap_or_else(|| id.to_owned());
+            match event {
+                forma_plugins::Event::Installed(id) => {
+                    let name = self.plugins.get(&id).map(|p| p.manifest.title().to_owned()).unwrap_or_else(|| title(&id));
+                    self.toast(t!("toast-plugin-installed", name = name), false, now);
+                }
+                forma_plugins::Event::Failed { id, error } => {
+                    if id == crate::plugins::JDTLS {
+                        if let Some(l) = &mut self.lsp {
+                            l.set_install_failed(error.clone());
+                        }
+                    }
+                    self.toast(t!("toast-plugin-install-failed", name = title(&id), error = error), true, now);
+                }
+                forma_plugins::Event::Removed(_) => {}
+            }
+        }
+        // Список установленных — в настройках, чтобы экспорт знал, какие плагины переносить.
+        let installed: Vec<String> = self.plugins.installed().iter().map(|p| p.id().to_owned()).collect();
+        if self.settings.plugins.installed != installed {
+            self.settings.plugins.installed = installed;
+        }
+        if self.themes.set_plugin_dirs(crate::plugins::theme_dirs(&self.plugins, &self.settings.plugins)) {
+            self.themes_rev += 1;
+        }
+        // Сервер Java — из включённого плагина jdtls; пока он ставится — показываем шаг.
+        if let Some(l) = &mut self.lsp {
+            l.set_server(crate::plugins::active_dir(&self.plugins, &self.settings.plugins, crate::plugins::JDTLS));
+            l.set_installing(self.plugins.progress(crate::plugins::JDTLS));
+        }
     }
 
     /// Сообщения jdtls и переходы к определению.
@@ -1121,7 +1204,20 @@ impl eframe::App for MyceliumApp {
     }
 }
 
-fn reveal_in_explorer(path: &Path) {
+/// Открывает папку в проводнике.
+pub(super) fn open_folder(path: &Path) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("explorer").arg(path).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let _ = std::process::Command::new(opener).arg(path).spawn();
+    }
+}
+
+pub(super) fn reveal_in_explorer(path: &Path) {
     #[cfg(windows)]
     {
         let _ = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();

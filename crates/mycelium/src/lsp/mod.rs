@@ -19,14 +19,16 @@ use eframe::egui;
 use serde_json::{Value, json};
 
 use crate::editors::code::{Document, Documents};
-use install::{InstallState, Installer, JavaHome};
+use forma_plugins::Progress;
+use install::JavaHome;
 use rpc::Rpc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum LspStatus {
-    /// jdtls ещё не установлен.
+    /// Плагин jdtls не установлен (или выключен).
     NotInstalled,
-    Installing(InstallState),
+    /// Плагин jdtls ставится.
+    Installing(Progress),
     /// Нет JDK нужной версии, на котором запускается jdtls.
     NoJdk(u32),
     Starting,
@@ -123,7 +125,8 @@ pub struct JavaLsp {
     root: PathBuf,
     jdk_hint: Option<PathBuf>,
     rpc: Option<Rpc>,
-    installer: Option<Installer>,
+    /// Папка плагина jdtls; `None` — плагин не установлен или выключен.
+    server: Option<PathBuf>,
     initialized: bool,
     pending: HashMap<i64, Pending>,
     /// Открытые на сервере документы и отправленная версия.
@@ -141,15 +144,15 @@ pub struct JavaLsp {
 }
 
 impl JavaLsp {
-    /// Подсказки для проекта: если jdtls установлен — сразу запускается.
-    pub fn new(ctx: &egui::Context, root: &Path, jdk_hint: Option<PathBuf>) -> Self {
+    /// Подсказки для проекта. `server` — папка плагина jdtls: если он есть, сервер сразу запускается.
+    pub fn new(ctx: &egui::Context, root: &Path, jdk_hint: Option<PathBuf>, server: Option<PathBuf>) -> Self {
         let mut lsp = Self {
             status: LspStatus::NotInstalled,
             ctx: ctx.clone(),
             root: root.to_path_buf(),
             jdk_hint,
             rpc: None,
-            installer: None,
+            server,
             initialized: false,
             pending: HashMap::new(),
             opened: HashMap::new(),
@@ -161,7 +164,7 @@ impl JavaLsp {
             settings: Value::Null,
             progress: HashMap::new(),
         };
-        if install::jdtls_dir().and_then(|d| install::launcher(&d)).is_some() {
+        if lsp.server.is_some() {
             lsp.start();
         }
         lsp
@@ -171,14 +174,40 @@ impl JavaLsp {
         self.initialized && matches!(self.status, LspStatus::Ready | LspStatus::Importing(_))
     }
 
-    /// Скачивает и устанавливает jdtls.
-    pub fn install(&mut self) {
-        if self.installer.is_some() {
+    /// Папка плагина jdtls (установлен и включён) или `None`. Сменилась — сервер перезапускается.
+    pub fn set_server(&mut self, dir: Option<PathBuf>) {
+        if self.server == dir {
             return;
         }
-        if let Some(dir) = install::jdtls_dir() {
-            self.installer = Some(Installer::start(dir));
-            self.status = LspStatus::Installing(InstallState::Downloading { done: 0, total: None });
+        self.stop();
+        self.server = dir;
+        if self.server.is_some() {
+            self.start();
+        } else {
+            self.status = LspStatus::NotInstalled;
+        }
+    }
+
+    pub fn has_server(&self) -> bool {
+        self.server.is_some()
+    }
+
+    /// Шаг установки плагина jdtls, пока сервера нет.
+    pub fn set_installing(&mut self, progress: Option<Progress>) {
+        if self.server.is_some() {
+            return;
+        }
+        match progress {
+            Some(p) => self.status = LspStatus::Installing(p),
+            None if matches!(self.status, LspStatus::Installing(_)) => self.status = LspStatus::NotInstalled,
+            None => {}
+        }
+    }
+
+    /// Установка плагина не удалась.
+    pub fn set_install_failed(&mut self, error: String) {
+        if self.server.is_none() {
+            self.status = LspStatus::Failed(error);
         }
     }
 
@@ -211,7 +240,10 @@ impl JavaLsp {
     }
 
     fn start(&mut self) {
-        let Some(dir) = install::jdtls_dir() else { return };
+        let Some(dir) = self.server.clone() else {
+            self.status = LspStatus::NotInstalled;
+            return;
+        };
         let Some(launcher) = install::launcher(&dir) else {
             self.status = LspStatus::NotInstalled;
             return;
@@ -257,7 +289,8 @@ impl JavaLsp {
         .arg(ws.join("data"))
         .current_dir(&self.root);
         // Init-скрипт, который уводит вывод Eclipse из `bin/` в `build/eclipse/`.
-        let init_script = dir.with_file_name("eclipse-output.gradle");
+        // Скрипт — в папке самого плагина jdtls, а не рядом с другими плагинами.
+        let init_script = dir.join("eclipse-output.gradle");
         if let Err(e) = std::fs::write(&init_script, ECLIPSE_OUTPUT_SCRIPT) {
             log::warn!("Failed to write {}: {e}", init_script.display());
         }
@@ -331,21 +364,6 @@ impl JavaLsp {
     /// Каждый кадр: установка, сообщения сервера, синхронизация открытых файлов.
     pub fn poll(&mut self, docs: &Documents) -> bool {
         let mut changed = false;
-        if let Some(inst) = &self.installer {
-            let state = inst.state();
-            changed = true;
-            match state {
-                InstallState::Done => {
-                    self.installer = None;
-                    self.start();
-                }
-                InstallState::Failed(e) => {
-                    self.installer = None;
-                    self.status = LspStatus::Failed(e);
-                }
-                s => self.status = LspStatus::Installing(s),
-            }
-        }
         let Some(rpc) = &mut self.rpc else { return changed };
         match rpc.poll() {
             Some(messages) => {

@@ -16,6 +16,7 @@ forma-layout.workspace = true
 forma-ui.workspace = true
 forma-actions.workspace = true
 forma-settings.workspace = true
+forma-plugins.workspace = true
 # Фоновая картинка окна.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
 mycelium-project.workspace = true

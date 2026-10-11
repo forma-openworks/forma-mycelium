@@ -15,6 +15,9 @@ use forma_ui::font_page::{self, FontPage};
 use forma_ui::fonts::Fonts;
 use forma_ui::find_action::{FindAction, Item};
 use forma_ui::keymap_page::{self, KeymapPage};
+use forma_ui::plugins_page::{self, PluginsPage};
+use forma_ui::theme_tools;
+use forma_plugins::PluginSettings;
 use forma_ui::settings_window::{self as sw, Footer, PageInfo, SettingsWindow};
 use forma_ui::theme::Palette;
 
@@ -31,6 +34,7 @@ pub(super) struct SettingsDialog {
     draft: Settings,
     keymap: KeymapPage,
     fonts: FontPage,
+    plugins: PluginsPage,
     /// «Секретный проект» — настройка открытого проекта, а не программы.
     discord_secret: bool,
 }
@@ -41,6 +45,7 @@ fn exportable() -> Vec<(&'static str, String, String)> {
         (Appearance::ID, t!("settings-page-appearance"), t!("settings-component-appearance")),
         (Fonts::ID, t!("settings-page-fonts"), t!("settings-component-fonts")),
         (Keymap::ID, t!("settings-page-keymap"), t!("settings-component-keymap")),
+        (PluginSettings::ID, t!("settings-page-plugins"), t!("settings-component-plugins")),
         (Discord::ID, t!("settings-page-discord"), t!("settings-component-discord")),
     ]
 }
@@ -68,6 +73,8 @@ struct ImportItem {
 pub(super) struct ImportDialog {
     archive: Archive,
     items: Vec<ImportItem>,
+    /// Плагины из архива, которых здесь нет: после импорта их предлагается поставить.
+    missing_plugins: Vec<String>,
     /// Итог после импорта: что применилось и что пропущено.
     report: Option<Vec<(String, Status)>>,
 }
@@ -80,6 +87,7 @@ impl MyceliumApp {
             draft: self.settings.clone(),
             keymap: KeymapPage::default(),
             fonts: FontPage::default(),
+            plugins: PluginsPage::default(),
             discord_secret: self.view.discord_secret,
         })));
     }
@@ -88,8 +96,10 @@ impl MyceliumApp {
         let platform = t!("settings-section-platform");
         vec![
             PageInfo { id: appearance::PAGE.into(), section: platform.clone(), title: t!("settings-page-appearance"), keywords: appearance::keywords() },
+            PageInfo { id: theme_tools::INSPECTOR_PAGE.into(), section: platform.clone(), title: t!("settings-page-theme-tokens"), keywords: theme_tools::keywords(&theme_kit()) },
             PageInfo { id: font_page::PAGE.into(), section: platform.clone(), title: t!("settings-page-fonts"), keywords: font_page::keywords() },
-            PageInfo { id: keymap_page::PAGE.into(), section: platform, title: t!("settings-page-keymap"), keywords: keymap_page::keywords(&self.actions) },
+            PageInfo { id: keymap_page::PAGE.into(), section: platform.clone(), title: t!("settings-page-keymap"), keywords: keymap_page::keywords(&self.actions) },
+            PageInfo { id: plugins_page::PAGE.into(), section: platform, title: t!("settings-page-plugins"), keywords: plugins_page::keywords() },
             PageInfo {
                 id: DISCORD_PAGE.into(),
                 section: APP_TITLE.into(),
@@ -106,6 +116,8 @@ impl MyceliumApp {
         self.settings.fonts = d.draft.fonts.clone();
         self.settings.keymap = d.draft.keymap.clone();
         self.settings.discord = d.draft.discord.clone();
+        // Список установленных плагинов ведёт сама программа — из черновика берём только выключенные.
+        self.settings.plugins.disabled = d.draft.plugins.disabled.clone();
         self.view.discord_secret = d.discord_secret;
         if language_changed {
             forma_i18n::set_language(&self.settings.appearance.effective_language());
@@ -115,7 +127,12 @@ impl MyceliumApp {
     }
 
     fn draft_dirty(&self, d: &SettingsDialog) -> bool {
-        d.draft.appearance != self.settings.appearance || d.draft.fonts != self.settings.fonts || d.draft.keymap != self.settings.keymap || d.draft.discord != self.settings.discord || d.discord_secret != self.view.discord_secret
+        d.draft.appearance != self.settings.appearance
+            || d.draft.fonts != self.settings.fonts
+            || d.draft.keymap != self.settings.keymap
+            || d.draft.discord != self.settings.discord
+            || d.draft.plugins.disabled != self.settings.plugins.disabled
+            || d.discord_secret != self.view.discord_secret
     }
 
     /// Окно настроек. Возвращает `true`, когда его пора закрыть.
@@ -127,6 +144,7 @@ impl MyceliumApp {
             appearance::PAGE => d.draft.appearance != live.appearance,
             font_page::PAGE => d.draft.fonts != live.fonts,
             keymap_page::PAGE => d.draft.keymap != live.keymap,
+            plugins_page::PAGE => d.draft.plugins.disabled != live.plugins.disabled,
             DISCORD_PAGE => d.draft.discord != live.discord || d.discord_secret != secret,
             _ => false,
         };
@@ -149,15 +167,47 @@ impl MyceliumApp {
         };
         // Шрифты темы, выбранной в черновике: от неё зависит, какие поля заблокированы.
         let draft_theme_fonts = self.themes.resolve(&d.draft.appearance.theme, crate::colors::DEFAULT_THEME, None).fonts;
-        let SettingsDialog { window, draft, keymap, fonts, discord_secret } = d;
+        let SettingsDialog { window, draft, keymap, fonts, plugins: plugins_ui, discord_secret } = d;
         let actions = &self.actions;
+        let plugins = &self.plugins;
+        let catalog = crate::plugins::catalog();
+        let mut plugin_actions = Vec::new();
+        let mut appearance_action = None;
+        // Тема, выбранная в черновике: её показывает инспектор и на её основе создаётся новая.
+        let draft_theme = self.themes.resolve(&d_theme_id(&draft.appearance.theme), crate::colors::DEFAULT_THEME, draft.appearance.accent);
+        let kit = theme_kit();
         let footer = window.show(ui, pal, max, &pages, &modified, dirty, &mut |ui, page, search| match page {
-            appearance::PAGE => appearance::page(ui, pal, search, &mut draft.appearance, &cx),
+            appearance::PAGE => appearance_action = appearance::page(ui, pal, search, &mut draft.appearance, &cx).or(appearance_action),
+            theme_tools::INSPECTOR_PAGE => theme_tools::inspector(ui, pal, search, &draft_theme, &kit),
             font_page::PAGE => fonts.ui(ui, pal, search, &mut draft.fonts, &draft_theme_fonts),
             keymap_page::PAGE => keymap.ui(ui, pal, actions, &mut draft.keymap, search),
+            plugins_page::PAGE => plugins_ui.ui(ui, pal, search, plugins, &catalog, &mut draft.plugins, &mut plugin_actions),
             DISCORD_PAGE => discord_page(ui, pal, search, &mut draft.discord, discord_secret, project_open),
             _ => {}
         });
+        for action in plugin_actions {
+            self.cmds.push(plugin_cmd(action));
+        }
+        match appearance_action {
+            Some(appearance::PageAction::CreateTheme) => {
+                let now = Self::now(ui.ctx());
+                match self.create_theme(&draft_theme, &kit) {
+                    Ok((id, path)) => {
+                        draft.appearance.theme = id;
+                        crate::app::reveal_in_explorer(&path);
+                        self.toast(t!("toast-theme-created", path = path.display().to_string()), false, now);
+                    }
+                    Err(e) => self.toast(t!("toast-theme-create-failed", error = e), true, now),
+                }
+            }
+            Some(appearance::PageAction::OpenThemesFolder) => {
+                if let Some(dir) = self.themes.dir() {
+                    let _ = std::fs::create_dir_all(dir);
+                    crate::app::open_folder(dir);
+                }
+            }
+            None => {}
+        }
         self.settings_page = d.window.page.clone();
         match footer {
             Some(Footer::Ok) => {
@@ -250,6 +300,9 @@ impl MyceliumApp {
         if on(Discord::ID) {
             archive.add(&self.settings.discord);
         }
+        if on(PluginSettings::ID) {
+            archive.add(&self.settings.plugins);
+        }
         let name = export::default_file_name(&APP, archive.manifest.created_unix);
         let Some(path) = rfd::FileDialog::new().set_title(t!("dialog-export-settings")).set_file_name(name).add_filter("zip", &["zip"]).save_file() else {
             return false;
@@ -278,6 +331,7 @@ impl MyceliumApp {
             Appearance::ID => decode::<Appearance>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
             Fonts::ID => decode::<Fonts>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
             Discord::ID => decode::<Discord>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
+            PluginSettings::ID => decode::<PluginSettings>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
             Keymap::ID => match decode::<Keymap>(value) {
                 Ok((mut k, mut skipped)) => {
                     skipped.extend(k.retain_known(&self.actions));
@@ -306,6 +360,12 @@ impl MyceliumApp {
                     self.settings.discord = d;
                 }
             }
+            PluginSettings::ID => {
+                // Переносится, что выключено; недостающие плагины предлагаются к установке.
+                if let Ok((p, _)) = decode::<PluginSettings>(value) {
+                    self.settings.plugins.disabled = p.disabled;
+                }
+            }
             Fonts::ID => {
                 if let Ok((f, _)) = decode::<Fonts>(value) {
                     self.settings.fonts = f;
@@ -328,9 +388,20 @@ impl MyceliumApp {
             for (id, status) in report {
                 status_row(ui, pal, &component_title(id), status, None, true);
             }
+            if !d.missing_plugins.is_empty() {
+                ui.add_space(8.0);
+                let names: Vec<String> = d.missing_plugins.iter().map(|id| crate::plugins::entry(id).map(|e| e.name).unwrap_or_else(|| id.clone())).collect();
+                forma_ui::widgets::icon_label(ui, "plugin", t!("settings-import-plugins-missing", items = names.join(", ")), 12.5, pal.text_muted);
+            }
             ui.add_space(14.0);
             let mut close = false;
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = sw::primary_button(ui, pal, &t!("action-done")).clicked());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                close = sw::primary_button(ui, pal, &t!("action-done")).clicked();
+                if !d.missing_plugins.is_empty() && forma_ui::icons::text_button(ui, "plugin", t!("settings-import-open-plugins")).clicked() {
+                    self.cmds.push(Cmd::OpenSettingsPage(plugins_page::PAGE.into()));
+                    close = true;
+                }
+            });
             return close;
         }
         title(ui, pal, &t!("settings-import-title"));
@@ -388,7 +459,59 @@ fn read_import(path: &Path, app: &MyceliumApp) -> Result<ImportDialog, String> {
         .collect();
     // Сначала то, что применится.
     items.sort_by_key(|i| !i.status.applicable());
-    Ok(ImportDialog { archive, items, report: None })
+    // Какие плагины стояли там, где делали архив, и не стоят здесь.
+    let missing_plugins = archive
+        .components
+        .get(PluginSettings::ID)
+        .and_then(|v| decode::<PluginSettings>(v).ok())
+        .map(|(p, _)| p.installed.into_iter().filter(|id| app.plugins.get(id).is_none()).collect())
+        .unwrap_or_default();
+    Ok(ImportDialog { archive, items, missing_plugins, report: None })
+}
+
+/// Пустой id темы в настройках значит тему по умолчанию.
+fn d_theme_id(id: &str) -> String {
+    if id.is_empty() { crate::colors::DEFAULT_THEME.to_owned() } else { id.to_owned() }
+}
+
+/// Что тема может поменять в Forma Mycelium: ключи платформы и программы, классы подсветки.
+fn theme_kit() -> theme_tools::Kit {
+    theme_tools::Kit {
+        groups: vec![(t!("settings-section-platform"), forma_ui::theme::Palette::TOKENS), (APP_TITLE.to_owned(), crate::colors::ModColors::TOKENS)],
+        syntax: crate::highlight::CLASS_SELECTORS.iter().map(|(class, _)| *class).collect(),
+    }
+}
+
+impl MyceliumApp {
+    /// Создаёт свою тему из шаблона на основе `base`: «Моя тема», «Моя тема 2»…
+    /// Возвращает id и путь к файлу.
+    fn create_theme(&mut self, base: &forma_ui::theme::Theme, kit: &theme_tools::Kit) -> Result<(String, std::path::PathBuf), String> {
+        let dir = self.themes.dir().ok_or("no themes folder")?.to_path_buf();
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let base_name = t!("theme-new-name");
+        let (name, id, path) = (1..)
+            .map(|n| if n == 1 { base_name.clone() } else { format!("{base_name} {n}") })
+            .map(|name| {
+                let id = forma_ui::theme::slug(&name);
+                let path = dir.join(format!("{id}.toml"));
+                (name, id, path)
+            })
+            .find(|(_, id, path)| !path.exists() && self.themes.get(id).is_none())
+            .ok_or("no free name")?;
+        std::fs::write(&path, theme_tools::template(&name, &id, base, kit)).map_err(|e| format!("{}: {e}", path.display()))?;
+        self.themes.scan();
+        Ok((id, path))
+    }
+}
+
+/// Команда для нажатого на странице «Плагины».
+pub(super) fn plugin_cmd(action: plugins_page::Action) -> Cmd {
+    match action {
+        plugins_page::Action::Install(id) => Cmd::InstallPlugin(id),
+        plugins_page::Action::InstallFile => Cmd::InstallPluginFile,
+        plugins_page::Action::Uninstall(id) => Cmd::UninstallPlugin(id),
+        plugins_page::Action::OpenFolder => Cmd::RevealPlugins,
+    }
 }
 
 fn title(ui: &mut Ui, pal: &Palette, text: &str) {
@@ -410,17 +533,17 @@ fn status_row(ui: &mut Ui, pal: &Palette, name: &str, status: &Status, check: Op
             });
         }
     }
-    let (text, color) = match status {
-        Status::Apply if done => (format!("✔ {}", t!("settings-import-applied")), pal.success),
-        Status::Apply => (format!("✔ {}", t!("settings-import-apply")), pal.success),
-        Status::Partial(skipped) if done => (format!("⚠ {}", t!("settings-import-applied-partial", items = skipped.join(", "))), pal.warning),
-        Status::Partial(skipped) => (format!("⚠ {}", t!("settings-import-partial", items = skipped.join(", "))), pal.warning),
-        Status::Unsupported => (format!("✖ {}", t!("settings-import-unsupported")), pal.text_faint),
-        Status::Invalid(e) => (format!("✖ {}", t!("settings-import-invalid", error = e.clone())), pal.danger),
+    let (icon, text, color) = match status {
+        Status::Apply if done => ("success", t!("settings-import-applied"), pal.success),
+        Status::Apply => ("success", t!("settings-import-apply"), pal.success),
+        Status::Partial(skipped) if done => ("warning", t!("settings-import-applied-partial", items = skipped.join(", ")), pal.warning),
+        Status::Partial(skipped) => ("warning", t!("settings-import-partial", items = skipped.join(", ")), pal.warning),
+        Status::Unsupported => ("error", t!("settings-import-unsupported"), pal.text_faint),
+        Status::Invalid(e) => ("error", t!("settings-import-invalid", error = e.clone()), pal.danger),
     };
     ui.horizontal(|ui| {
         ui.add_space(26.0);
-        ui.add(egui::Label::new(RichText::new(text).size(11.5).color(color)).wrap());
+        forma_ui::widgets::icon_label(ui, icon, text, 11.5, color);
     });
     ui.add_space(4.0);
 }

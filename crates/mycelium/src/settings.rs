@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use forma_actions::Keymap;
+use forma_plugins::PluginSettings;
 use forma_settings::{AppInfo, Component, Store};
 use forma_ui::appearance::Appearance;
 use forma_ui::fonts::Fonts;
@@ -84,6 +85,7 @@ pub struct Settings {
     pub fonts: Fonts,
     pub keymap: Keymap,
     pub discord: Discord,
+    pub plugins: PluginSettings,
     pub recent: Recent,
 }
 
@@ -96,7 +98,7 @@ impl Settings {
             return old;
         }
         let had_fonts = store.exists::<Fonts>();
-        let mut s = Self { appearance: store.load(), fonts: store.load(), keymap: store.load(), discord: store.load(), recent: store.load() };
+        let mut s = Self { appearance: store.load(), fonts: store.load(), keymap: store.load(), discord: store.load(), plugins: store.load(), recent: store.load() };
         // Размер текста первых версий (основа шкалы, текст был на 10% мельче) переезжает в «Шрифты».
         if let Some(old) = s.appearance.legacy_font_size.take()
             && !had_fonts
@@ -112,6 +114,7 @@ impl Settings {
         store.save(&self.fonts);
         store.save(&self.keymap);
         store.save(&self.discord);
+        store.save(&self.plugins);
         store.save(&self.recent);
     }
 }
@@ -159,6 +162,7 @@ impl Legacy {
             fonts,
             keymap: Keymap::default(),
             discord: Discord { enabled: self.discord_presence },
+            plugins: PluginSettings::default(),
             recent: Recent { projects: self.recent_projects, last: self.last_project },
         }
     }

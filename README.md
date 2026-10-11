@@ -71,7 +71,7 @@ The name comes from mycelium, the network that quietly connects everything aroun
   - documentation on hover;
   - go to definition (`Ctrl+click`, `F12`, `Ctrl+B`), even into Minecraft's code.
 
-  The language server is installed with one click, only when you want it.
+  The language server is an optional plugin, installed with one click when you want it.
 
 **Feels like home**
 - **A layout in the spirit of Blender.** Any area splits into tabs. Tabs can be dragged between areas or torn out into separate OS windows.
@@ -82,9 +82,13 @@ The name comes from mycelium, the network that quietly connects everything aroun
   - built-in themes: Mycelium Dark Default, Mycelium Light Default and Visual Studio Dark;
   - your own themes are `.toml` files that override only what they change, so a pink menu bar is literally one line (`"menubar.bg" = "#ff69b4"`). They reload as soon as you save them;
   - a theme sets every region (menu bar, status bar, tabs, editor, popups, buttons, console, origin colors), code highlighting with bold and italic, and optionally its own fonts and background picture;
-  - **Quick switch theme** (``Ctrl+` ``): hover or use the arrows to preview, Enter keeps it, Esc brings the old one back.
+  - **Quick switch theme** (``Ctrl+` ``): hover or use the arrows to preview, Enter keeps it, Esc brings the old one back;
+  - **icons** come from the [Lucide](https://lucide.dev) set. A theme can replace any icon with its own SVG and recolor any icon with an `icon.<name>` key;
+  - **tools for theme authors:** *Create theme* writes a new theme file that lists every key, highlight class and icon, and the *Theme inspector* shows them all with their current values.
 - **Fonts:** separate fonts for the interface, the code editor and the console, picked from the fonts installed on your system, with size in pixels and line height. `Ctrl+mouse wheel` resizes the editor and console font.
 - **A background picture,** drawn semi-transparent over the window, like in Rider.
+- **Narrow areas keep working.** Text is shortened with an ellipsis, toolbars wrap or fold their filters into a menu, extra tabs and workspaces move into a » menu, and dialogs scroll instead of overflowing the window.
+- **Plugins.** Anything big and optional is a plugin: the Java language server now, Kotlin and Python later. The Plugins page has Recommended and Installed tabs, one-click installs with progress, an on/off switch, and theme packs installed from a `.zip`. Recommended plugins are also offered on the welcome screen.
 - **Settings in the spirit of JetBrains IDEs:**
   - a settings window with a page tree and search across every option;
   - changes are applied with Apply or OK and discarded with Cancel;
@@ -100,8 +104,9 @@ The name comes from mycelium, the network that quietly connects everything aroun
    - ✅ settings grouped as in Rider, export and import;
    - ✅ a keymap and Find Action;
    - ✅ themes where everything can be restyled, three independent fonts, a background picture;
-   - an SVG icon set that themes can replace;
-   - plugins: themes, new windows, Python scripting. Heavy tools such as jdtls become optional plugins.
+   - ✅ an SVG icon set that themes can replace and recolor, and tools for theme authors;
+   - ✅ plugins: a plugin manager, jdtls as an optional plugin, theme packs;
+   - Python scripting and new windows from plugins.
 4. **Hyphae, the knowledge engine.** It understands the whole mod:
    - which mod every class, resource and log line belongs to;
    - client and server sides, threads, loading stages;
@@ -115,6 +120,7 @@ The name comes from mycelium, the network that quietly connects everything aroun
 - [Rust](https://www.rust-lang.org/) and [egui](https://github.com/emilk/egui), rendered through [wgpu](https://wgpu.rs/) on Vulkan. The UI is drawn by the app itself, with no web view.
 - [Fluent](https://projectfluent.org/) for localization.
 - [Eclipse JDT Language Server](https://github.com/eclipse-jdtls/eclipse.jdt.ls) for Java assistance.
+- [Lucide](https://lucide.dev) icons (ISC License, see `crates/forma-ui/icons/lucide/LICENSE`), drawn with [resvg](https://github.com/linebender/resvg).
 - Gradle init scripts for the project model. No Gradle plugin is added to your mod.
 
 ### Building
@@ -172,7 +178,9 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 | `crates/mycelium-project` | The mod project: `.mycelium`, detection, the Gradle model, libraries, code origin |
 | `crates/mycelium-log` | Parsing and classifying game, Gradle and compiler logs |
 | `crates/forma-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
-| `crates/forma-ui` | The theme engine, fonts, widgets, the settings window, the keymap page, Find Action |
+| `crates/forma-ui` | The theme engine, icons, fonts, widgets, the settings window and its pages, Find Action, theme tools |
+| `crates/forma-ui/icons/lucide/` | The Lucide icons used by the app and their license |
+| `crates/forma-plugins` | Plugins: the manifest, installing, removing, turning on and off |
 | `crates/mycelium/themes/` | Built-in themes |
 | `crates/forma-actions` | Actions and the keymap |
 | `crates/forma-settings` | Settings components, their files, export and import |
@@ -184,8 +192,8 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 
 ### Where data lives
 
-- `%APPDATA%\Forma\Mycelium\` stores workspaces, window placement and the default layout. Settings live in `options\`, one file per category (`appearance.json`, `fonts.json`, `keymap.json`…), and your own themes in `themes\`. Set `FORMA_CONFIG_HOME` to keep them somewhere else, for example for a portable copy.
-- `%LOCALAPPDATA%\Forma\Mycelium\` stores the language server and its per-project indexes. Eclipse metadata lives here, not in your mod.
+- `%APPDATA%\Forma\Mycelium\` stores workspaces, window placement and the default layout. Settings live in `options\`, one file per category (`appearance.json`, `fonts.json`, `keymap.json`…), and your own themes in `themes\`. Set `FORMA_CONFIG_HOME` to keep them somewhere else, for example for a portable copy (plugins and caches then move there too, into `cache\`).
+- `%LOCALAPPDATA%\Forma\Mycelium\` stores plugins (`plugins\`, for example the Java language server) and per-project indexes. Eclipse metadata lives here, not in your mod.
 - `<mod>\.mycelium\` is the project:
   - `project.json` and `runs.json` are meant for git;
   - `workspace.json` is your personal layout;
@@ -246,7 +254,7 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
   - при наведении показывается описание;
   - переход к определению (`Ctrl+щелчок`, `F12`, `Ctrl+B`), в том числе в код Minecraft.
 
-  Языковой сервер ставится одной кнопкой и только когда ты этого хочешь.
+  Языковой сервер — необязательный плагин: ставится одной кнопкой, когда ты этого хочешь.
 
 **Удобен как дом**
 - **Раскладка в духе Blender.** Любая область делится на вкладки. Их можно перетаскивать между областями и выносить в отдельные окна ОС.
@@ -257,9 +265,13 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
   - встроенные темы: Mycelium Dark Default, Mycelium Light Default и Visual Studio Dark;
   - свои темы — файлы `.toml`, где задаётся только то, что меняется. Розовая шапка — буквально одна строка (`"menubar.bg" = "#ff69b4"`). Темы обновляются сразу после сохранения файла;
   - тема задаёт каждую область (шапку, строку состояния, вкладки, редактор, всплывающие окна, кнопки, консоль, цвета происхождения), подсветку кода с жирным и курсивом, а при желании — свои шрифты и фоновую картинку;
-  - **быстрая смена темы** (``Ctrl+` ``): наведение или стрелки — посмотреть, Enter — оставить, Esc — вернуть прежнюю.
+  - **быстрая смена темы** (``Ctrl+` ``): наведение или стрелки — посмотреть, Enter — оставить, Esc — вернуть прежнюю;
+  - **значки** — из набора [Lucide](https://lucide.dev). Тема может заменить любой значок своим SVG и перекрасить любой значок ключом `icon.<имя>`;
+  - **инструменты для авторов тем:** «Создать тему» пишет новый файл темы, где перечислены все ключи, классы подсветки и значки, а «Инспектор темы» показывает их все с текущими значениями.
 - **Шрифты:** отдельные для интерфейса, редактора кода и консоли, из установленных в системе, с размером в пикселях и высотой строки. `Ctrl+колёсико` меняет размер шрифта редактора и консоли.
 - **Фоновая картинка** полупрозрачно поверх окна, как в Rider.
+- **Узкие области не ломаются.** Текст сокращается многоточием, панели переносятся или прячут фильтры в меню, лишние вкладки и рабочие пространства уходят в меню «»», а диалоги прокручиваются, а не вылезают за окно.
+- **Плагины.** Всё большое и необязательное — плагин: сейчас языковой сервер Java, потом Kotlin и Python. На странице «Плагины» есть вкладки «Рекомендуемое» и «Установленные», установка в одну кнопку с прогрессом, включение и выключение, а наборы тем ставятся из `.zip`. Рекомендуемые плагины предлагаются и на экране приветствия.
 - **Настройки в духе IDE от JetBrains:**
   - окно настроек с деревом страниц и поиском по всем пунктам;
   - изменения применяются кнопками «Применить» или «ОК» и отменяются «Отменой»;
@@ -275,8 +287,9 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
    - ✅ настройки по группам как в Rider, экспорт и импорт;
    - ✅ раскладка клавиш и «Найти действие»;
    - ✅ темы, где перекрашивается всё, три независимых шрифта, фоновая картинка;
-   - набор SVG-иконок, которые темы могут заменять;
-   - плагины: темы, новые окна, скрипты на Python. Тяжёлые инструменты вроде jdtls становятся необязательными плагинами.
+   - ✅ набор SVG-значков, которые темы могут заменять и перекрашивать, и инструменты для авторов тем;
+   - ✅ плагины: менеджер плагинов, jdtls как необязательный плагин, наборы тем;
+   - скрипты на Python и новые окна из плагинов.
 4. **Hyphae, движок знаний.** Он понимает весь мод:
    - к какому моду относится каждый класс, ресурс и строка лога;
    - стороны клиента и сервера, потоки, этапы загрузки;
@@ -290,6 +303,7 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 - [Rust](https://www.rust-lang.org/) и [egui](https://github.com/emilk/egui), отрисовка через [wgpu](https://wgpu.rs/) на Vulkan. Интерфейс программа рисует сама, без веб-движка.
 - [Fluent](https://projectfluent.org/) для локализации.
 - [Eclipse JDT Language Server](https://github.com/eclipse-jdtls/eclipse.jdt.ls) для подсказок Java.
+- Значки [Lucide](https://lucide.dev) (лицензия ISC, см. `crates/forma-ui/icons/lucide/LICENSE`), рисуются с помощью [resvg](https://github.com/linebender/resvg).
 - Init-скрипты Gradle для модели проекта. Никаких плагинов Gradle в мод не добавляется.
 
 ### Сборка
@@ -347,7 +361,9 @@ cargo test
 | `crates/mycelium-project` | Проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
 | `crates/mycelium-log` | Разбор и классификация логов игры, Gradle и компиляторов |
 | `crates/forma-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
-| `crates/forma-ui` | Движок тем, шрифты, виджеты, окно настроек, страница раскладки клавиш, «Найти действие» |
+| `crates/forma-ui` | Движок тем, значки, шрифты, виджеты, окно настроек и его страницы, «Найти действие», инструменты для тем |
+| `crates/forma-ui/icons/lucide/` | Значки Lucide, которые использует программа, и их лицензия |
+| `crates/forma-plugins` | Плагины: описание, установка, удаление, включение и выключение |
 | `crates/mycelium/themes/` | Встроенные темы |
 | `crates/forma-actions` | Действия и раскладка клавиш |
 | `crates/forma-settings` | Компоненты настроек, их файлы, экспорт и импорт |
@@ -359,8 +375,8 @@ cargo test
 
 ### Где хранятся данные
 
-- `%APPDATA%\Forma\Mycelium\` — рабочие пространства, положение окна и стандартная раскладка. Настройки лежат в `options\`, по файлу на категорию (`appearance.json`, `fonts.json`, `keymap.json`…), а свои темы — в `themes\`. Переменная `FORMA_CONFIG_HOME` переносит их в другую папку, например для переносной копии.
-- `%LOCALAPPDATA%\Forma\Mycelium\` — языковой сервер и его индексы по проектам. Метаданные Eclipse лежат здесь, а не в папке мода.
+- `%APPDATA%\Forma\Mycelium\` — рабочие пространства, положение окна и стандартная раскладка. Настройки лежат в `options\`, по файлу на категорию (`appearance.json`, `fonts.json`, `keymap.json`…), а свои темы — в `themes\`. Переменная `FORMA_CONFIG_HOME` переносит их в другую папку, например для переносной копии (тогда туда же, в `cache\`, переезжают плагины и кеши).
+- `%LOCALAPPDATA%\Forma\Mycelium\` — плагины (`plugins\`, например языковой сервер Java) и индексы по проектам. Метаданные Eclipse лежат здесь, а не в папке мода.
 - `<мод>\.mycelium\` — сам проект:
   - `project.json` и `runs.json` предназначены для git;
   - `workspace.json` — твоя личная раскладка;

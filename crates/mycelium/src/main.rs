@@ -9,6 +9,7 @@ mod editors;
 mod highlight;
 mod icon;
 mod lsp;
+mod plugins;
 mod run;
 mod settings;
 mod sync;

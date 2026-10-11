@@ -53,14 +53,15 @@ impl RunKind {
         }
     }
 
+    /// Имя значка (см. `forma_ui::icons`).
     pub fn icon(self) -> &'static str {
         match self {
-            RunKind::Client => "🎮",
-            RunKind::Server => "🖧",
-            RunKind::Data => "🗃",
-            RunKind::Other => "▶",
-            RunKind::Build => "🔨",
-            RunKind::Clean => "🧹",
+            RunKind::Client => "run-client",
+            RunKind::Server => "run-server",
+            RunKind::Data => "run-data",
+            RunKind::Other => "run",
+            RunKind::Build => "run-build",
+            RunKind::Clean => "run-clean",
         }
     }
 

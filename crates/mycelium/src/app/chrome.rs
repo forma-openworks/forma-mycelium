@@ -46,7 +46,7 @@ impl MyceliumApp {
                 let total = ui.available_width();
                 let gap = ui.spacing().item_spacing.x;
                 let menus_w: f32 = menu_titles().iter().map(|t| widgets::button_width(ui, t, 0.0) + gap).sum();
-                let burger_w = widgets::button_width(ui, "☰", 0.0) + gap;
+                let burger_w = forma_ui::icons::SIZE + 2.0 * ui.spacing().button_padding.x + gap;
                 let run_w = if self.project.is_some() { self.run_buttons_width(ui) } else { 0.0 };
                 let active_title = self.layout.workspaces[self.layout.active].title();
                 // Текущее пространство и кнопки «+» и «»» рядом с ним.
@@ -77,12 +77,13 @@ impl MyceliumApp {
     fn run_buttons_width(&self, ui: &Ui) -> f32 {
         let gap = ui.spacing().item_spacing.x;
         let running = self.selected_config().is_some_and(|c| self.console.is_running_config(&c.id));
-        let mut w = widgets::button_width(ui, "▶", 0.0) + gap;
+        let button = ui.spacing().interact_size.y + gap;
+        let mut w = button;
         if running {
-            w += widgets::button_width(ui, "■", 0.0) + gap;
+            w += button;
         }
         if self.console.running().count() > 1 {
-            w += widgets::button_width(ui, "■■", 0.0) + gap;
+            w += button;
         }
         w
     }
@@ -90,7 +91,7 @@ impl MyceliumApp {
     /// Меню программы. `compact` — все меню свёрнуты в одно «☰» (узкое окно).
     fn menus(&mut self, ui: &mut Ui, pal: &Palette, compact: bool) {
         if compact {
-            widgets::top_menu(ui, "☰", false, |ui| {
+            widgets::top_menu_icon(ui, "menu", &t!("menu-compact"), false, |ui| {
                 ui.menu_button(t!("menu-file"), |ui| self.file_menu(ui, pal));
                 ui.menu_button(t!("menu-view"), |ui| self.view_menu(ui, pal));
                 ui.menu_button(t!("menu-run"), |ui| self.run_menu(ui, pal));
@@ -199,8 +200,8 @@ impl MyceliumApp {
         for c in &self.configs {
             // Идущий запуск помечен точкой; повторный выбор перезапускает его.
             let running = self.console.is_running_config(&c.id);
-            let text = format!("{}  {}{}", c.kind.icon(), c.label(), if running { "  ●" } else { "" });
-            if ui.button(text).on_hover_text(c.command_line()).clicked() {
+            let text = if running { format!("{}  ●", c.label()) } else { c.label() };
+            if forma_ui::icons::item(ui, c.kind.icon(), text, false).on_hover_text(c.command_line()).clicked() {
                 self.cmds.push(Cmd::RunConfig(c.id.clone()));
             }
         }
@@ -213,7 +214,8 @@ impl MyceliumApp {
             self.cmds.push(Cmd::StopAll);
         }
         ui.separator();
-        if ui.add_enabled(self.project.is_some(), item(format!("✎  {}", t!("run-edit-configs")), self.keys(actions::EDIT_RUN_CONFIGS))).clicked() {
+        let edit = icon_item(ui, "edit", t!("run-edit-configs"), self.keys(actions::EDIT_RUN_CONFIGS));
+        if ui.add_enabled(self.project.is_some(), edit).clicked() {
             self.cmds.push(Cmd::EditRunConfigs);
         }
     }
@@ -221,7 +223,7 @@ impl MyceliumApp {
     fn window_menu(&mut self, ui: &mut Ui) {
         ui.menu_button(t!("menu-open-editor"), |ui| {
             for kind in EditorKind::ALL {
-                if ui.button(format!("{}  {}", kind.icon(), kind.title())).clicked() {
+                if forma_ui::icons::item(ui, kind.icon(), kind.title(), false).clicked() {
                     self.cmds.push(Cmd::OpenEditor(kind));
                 }
             }
@@ -331,7 +333,7 @@ impl MyceliumApp {
         }
         let hidden: Vec<usize> = (0..count).filter(|i| !visible[*i]).collect();
         if !hidden.is_empty() {
-            let more = ui.add(egui::Button::new(RichText::new("»").size(15.0).color(pal.text_muted)).frame(false)).on_hover_text(t!("workspace-more", count = hidden.len()));
+            let more = forma_ui::icons::flat_button(ui, "overflow", pal.text_muted).on_hover_text(t!("workspace-more", count = hidden.len()));
             egui::Popup::menu(&more).style(theme::menu_style).show(|ui| {
                 for i in hidden {
                     if ui.button(&titles[i]).clicked() {
@@ -340,7 +342,7 @@ impl MyceliumApp {
                 }
             });
         }
-        let plus = ui.add(egui::Button::new(RichText::new("+").size(15.0).color(pal.text_muted)).frame(false)).on_hover_text(t!("menu-new-workspace"));
+        let plus = forma_ui::icons::flat_button(ui, "add", pal.text_muted).on_hover_text(t!("menu-new-workspace"));
         egui::Popup::menu(&plus).style(theme::menu_style).show(|ui| self.new_workspace_items(ui));
     }
 
@@ -394,20 +396,26 @@ impl MyceliumApp {
                 ui.label(small(t!("status-no-project"), pal.statusbar_text));
             }
         }
+        let item = crate::editors::problem_ui::icon_count;
         if self.sync.is_busy() {
-            ui.label(small(format!("⟳ {}…", t!("status-syncing")), pal.accent));
+            item(ui, "refresh", &format!("{}…", t!("status-syncing")), 12.0, pal.accent);
         }
         if let Some(lsp) = &self.lsp {
-            let (text, color) = match &lsp.status {
+            let java = match &lsp.status {
                 crate::lsp::LspStatus::Ready => match lsp.problem_counts() {
-                    (0, 0) => ("☕ Java ✔".to_owned(), pal.statusbar_text),
-                    (e, w) => (format!("☕ ✖ {e}  ⚠ {w}"), if e > 0 { pal.danger } else { pal.warning }),
+                    (0, 0) => item(ui, "jdk", "Java", 12.0, pal.statusbar_text),
+                    (e, w) => {
+                        // Значок Java и счётчики ошибок и предупреждений компилятора.
+                        let r = item(ui, "jdk", "", 12.0, pal.statusbar_text);
+                        let r = r.union(item(ui, "error", &e.to_string(), 12.0, if e > 0 { pal.danger } else { pal.statusbar_text }));
+                        r.union(item(ui, "warning", &w.to_string(), 12.0, if w > 0 { pal.warning } else { pal.statusbar_text }))
+                    }
                 },
-                crate::lsp::LspStatus::NotInstalled => (format!("☕ {}", t!("status-lsp-off")), pal.statusbar_text),
-                crate::lsp::LspStatus::Failed(_) | crate::lsp::LspStatus::NoJdk(_) => (format!("☕ {}", t!("status-lsp-error")), pal.danger),
-                _ => (format!("☕ {}…", t!("status-lsp-busy")), pal.accent),
+                crate::lsp::LspStatus::NotInstalled => item(ui, "jdk", &t!("status-lsp-off"), 12.0, pal.statusbar_text),
+                crate::lsp::LspStatus::Failed(_) | crate::lsp::LspStatus::NoJdk(_) => item(ui, "jdk", &t!("status-lsp-error"), 12.0, pal.danger),
+                _ => item(ui, "jdk", &format!("{}…", t!("status-lsp-busy")), 12.0, pal.accent),
             };
-            ui.label(small(text, color)).on_hover_text(t!("status-lsp-hint"));
+            java.on_hover_text(t!("status-lsp-hint"));
         }
         // Все идущие запуски: «▶ Клиент · 1:23 · Сервер · 0:45».
         let now = ui.input(|i| i.time);
@@ -423,7 +431,7 @@ impl MyceliumApp {
             })
             .collect();
         if !running.is_empty() {
-            let resp = ui.add(egui::Label::new(small(format!("▶ {}", running.join("  ·  ")), pal.accent)).sense(Sense::click()));
+            let resp = item(ui, "run", &running.join("  ·  "), 12.0, pal.accent);
             if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
                 self.cmds.push(Cmd::OpenEditor(EditorKind::Console));
             }
@@ -433,7 +441,8 @@ impl MyceliumApp {
         if !problems.is_empty() {
             let errors = problems.iter().filter(|p| p.sample.crash || p.sample.level >= mycelium_log::Level::Error || p.sample.throwable.is_some()).count();
             let warnings = problems.len() - errors;
-            let resp = ui.add(egui::Label::new(RichText::new(format!("✖ {errors}  ⚠ {warnings}")).size(12.0).color(if errors > 0 { pal.danger } else { pal.warning })).sense(Sense::click()));
+            let resp = item(ui, "error", &errors.to_string(), 12.0, if errors > 0 { pal.danger } else { pal.statusbar_text });
+            let resp = resp.union(item(ui, "warning", &warnings.to_string(), 12.0, if warnings > 0 { pal.warning } else { pal.statusbar_text }));
             if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(t!("status-problems")).clicked() {
                 self.cmds.push(Cmd::OpenEditor(EditorKind::Exceptions));
             }
@@ -466,17 +475,27 @@ impl MyceliumApp {
                     widgets::centered_text(ui, &t!("welcome-tagline"), 15.0, pal.text_muted, 460.0);
                     ui.add_space(gap);
                     let width = (ui.available_width() - 32.0).clamp(120.0, 300.0);
-                    let big = |text: String| egui::Button::new(RichText::new(text).size(15.5)).min_size(vec2(width, 40.0)).corner_radius(10).truncate();
-                    if ui.add(big(format!("📂  {}", t!("action-open-project"))).fill(pal.accent_soft)).clicked() {
+                    let ctx = ui.ctx().clone();
+                    let big = |icon: &str, text: String| {
+                        let img = forma_ui::icons::image(&ctx, icon, 18.0, pal.text);
+                        egui::Button::new((img, RichText::new(text).size(15.5))).min_size(vec2(width, 40.0)).corner_radius(10).truncate()
+                    };
+                    if ui.add(big("open", t!("action-open-project")).fill(pal.accent_soft)).clicked() {
                         self.cmds.push(Cmd::OpenProjectDialog);
                     }
                     ui.add_space(6.0);
-                    if ui.add(big(format!("➜  {}", t!("welcome-continue")))).clicked() {
+                    if ui.add(big("continue", t!("welcome-continue"))).clicked() {
                         self.cmds.push(Cmd::ContinueWithoutProject);
                     }
+                    // Рекомендуемые плагины: ставятся одной кнопкой, пока их нет.
+                    let catalog = crate::plugins::catalog();
+                    let mut plugin_actions = Vec::new();
+                    ui.add_space(gap);
+                    forma_ui::plugins_page::welcome(ui, &pal, &self.plugins, &catalog, (ui.available_width() - 32.0).clamp(240.0, 460.0), &mut plugin_actions);
+                    self.cmds.extend(plugin_actions.into_iter().map(super::settings_dialog::plugin_cmd));
                     let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
                     if !recent.is_empty() {
-                        ui.add_space(gap);
+                        ui.add_space(gap * 0.5);
                         ui.label(RichText::new(t!("welcome-recent")).size(13.0).color(pal.text_faint));
                         ui.add_space(4.0);
                         for p in recent.into_iter().take(6) {
@@ -488,7 +507,8 @@ impl MyceliumApp {
                         }
                     }
                     ui.add_space(gap);
-                    if ui.add(egui::Button::new(RichText::new(format!("⚙  {}", t!("action-settings"))).size(13.0).color(pal.text_muted)).frame(false)).clicked() {
+                    let gear = forma_ui::icons::image(ui.ctx(), "settings", 15.0, pal.text_muted);
+                    if ui.add(egui::Button::new((gear, RichText::new(t!("action-settings")).size(13.0).color(pal.text_muted))).frame(false)).clicked() {
                         self.cmds.push(Cmd::Settings);
                     }
                     ui.add_space(4.0);
@@ -676,6 +696,12 @@ fn menu_titles() -> [String; 5] {
 /// Пункт меню с сочетанием клавиш справа.
 fn item(text: String, shortcut: String) -> egui::Button<'static> {
     egui::Button::new(text).shortcut_text(shortcut)
+}
+
+/// Пункт меню со значком слева и сочетанием клавиш справа.
+fn icon_item(ui: &Ui, icon: &str, text: String, shortcut: String) -> egui::Button<'static> {
+    let img = forma_ui::icons::image(ui.ctx(), icon, forma_ui::icons::SIZE - 2.0, ui.visuals().widgets.inactive.fg_stroke.color);
+    egui::Button::new((img, text)).shortcut_text(shortcut)
 }
 
 /// Ширина вкладки рабочего пространства с названием `title`.

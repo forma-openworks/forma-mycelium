@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use eframe::egui::{self, Align, Align2, CornerRadius, CursorIcon, FontId, Layout, RichText, Sense, Ui, vec2};
+use eframe::egui::{self, Align, CornerRadius, CursorIcon, FontId, Layout, RichText, Sense, Ui, vec2};
 use forma_i18n::t;
 use mycelium_log::{Level, Problem};
 use mycelium_project::{Libraries, Origin};
@@ -58,11 +58,12 @@ fn severity(p: &Problem) -> u8 {
     }
 }
 
-fn severity_glyph(p: &Problem) -> &'static str {
+/// Значок серьёзности: краш, ошибка, предупреждение.
+fn severity_icon(p: &Problem) -> &'static str {
     match severity(p) {
-        0 => "💥",
-        1 => "✖",
-        _ => "⚠",
+        0 => "crash",
+        1 => "error",
+        _ => "warning",
     }
 }
 
@@ -141,7 +142,7 @@ pub fn ui(ui: &mut Ui, pal: &Palette, view: &mut ExceptionsView, console: &Conso
                 }
             }
             if compact {
-                let more = ui.add(egui::Button::new("⋯").selected(view.only_own || view.only_errors)).on_hover_text(t!("console-filters"));
+                let more = forma_ui::icons::button(ui, "filter", view.only_own || view.only_errors).on_hover_text(t!("console-filters"));
                 egui::Popup::menu(&more).style(forma_ui::theme::menu_style).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                     if ui.add(egui::Button::new(&only_own).selected(view.only_own)).clicked() {
                         view.only_own = !view.only_own;
@@ -161,12 +162,12 @@ pub fn ui(ui: &mut Ui, pal: &Palette, view: &mut ExceptionsView, console: &Conso
             }
         },
         |ui| {
-            if ui.button("🗑").on_hover_text(t!("exceptions-clear")).clicked() {
+            if forma_ui::icons::button(ui, "trash", false).on_hover_text(t!("exceptions-clear")).clicked() {
                 cmds.push(Cmd::ClearProblems);
                 cleared = true;
             }
-            ui.label(RichText::new(format!("⚠ {warnings}")).color(pal.warning));
-            ui.label(RichText::new(format!("✖ {errors}")).color(pal.danger));
+            super::problem_ui::icon_count(ui, "warning", &warnings.to_string(), 13.0, pal.warning);
+            super::problem_ui::icon_count(ui, "error", &errors.to_string(), 13.0, pal.danger);
         },
     );
     if cleared {
@@ -185,7 +186,7 @@ pub fn ui(ui: &mut Ui, pal: &Palette, view: &mut ExceptionsView, console: &Conso
         } else {
             (t!("console-filtered-title"), t!("console-filtered-hint"))
         };
-        super::empty_state(ui, pal, "⚠", &title, &hint);
+        super::empty_state(ui, pal, "editor-exceptions", &title, &hint);
         return;
     }
 
@@ -230,7 +231,10 @@ pub fn ui(ui: &mut Ui, pal: &Palette, view: &mut ExceptionsView, console: &Conso
                 if !noise.is_empty() {
                     if visible.is_empty() {
                         ui.add_space(6.0);
-                        ui.label(RichText::new(format!("  ✔ {}", t!("exceptions-only-noise"))).color(pal.success));
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            forma_ui::widgets::icon_label(ui, "success", t!("exceptions-only-noise"), 13.0, pal.success);
+                        });
                         ui.add_space(4.0);
                     }
                     let total = noise.iter().map(|p| p.count).sum();
@@ -272,7 +276,8 @@ fn group_header(ui: &mut Ui, pal: &Palette, label: &str, problems: usize, total:
         ui.painter().rect_filled(rect, CornerRadius::same(5), pal.bg_hover.gamma_multiply(0.6));
     }
     let painter = ui.painter_at(rect);
-    painter.text(rect.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, if collapsed { "▸" } else { "▾" }, FontId::proportional(12.0), pal.text_faint);
+    let arrow = egui::Rect::from_center_size(rect.left_center() + vec2(15.0, 0.0), vec2(12.0, 12.0));
+    forma_ui::icons::paint(&painter, arrow, if collapsed { "chevron-right" } else { "chevron-down" }, pal.text_faint);
     let counts = if total as usize > problems { format!("{problems} · ×{total}") } else { problems.to_string() };
     let counts = painter.layout_no_wrap(counts, FontId::proportional(12.0), pal.text_faint);
     // Название группы обрезается, а счётчик остаётся виден.
@@ -298,7 +303,7 @@ fn problem_row(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, selected: bool
         0 | 1 => pal.danger,
         _ => pal.warning,
     };
-    painter.text(egui::pos2(rect.left() + 26.0, rect.top() + 12.0), Align2::CENTER_CENTER, severity_glyph(p), FontId::proportional(12.5), sev_color);
+    forma_ui::icons::paint(&painter, egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.top() + 12.0), vec2(14.0, 14.0)), severity_icon(p), sev_color);
     let title = entry_title(e);
     let title_color = if e.noise { pal.text_muted } else { pal.heading };
     // Счётчик повторов и отметка «новое» не обрезаются — место под них берётся у названия.

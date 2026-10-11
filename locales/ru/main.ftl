@@ -42,6 +42,7 @@ workspace-rename = Переименовать…
 workspace-rename-title = Название пространства
 workspace-duplicate = Дублировать
 workspace-delete = Удалить
+menu-compact = Меню
 workspace-more = { $count ->
     [one] Ещё { $count } рабочее пространство
     [few] Ещё { $count } рабочих пространства
@@ -139,4 +140,18 @@ action-group-window = Окно
 action-group-editor = Редактор кода
 action-group-help = Справка
 settings-component-fonts = Шрифты интерфейса, редактора и консоли
+settings-component-plugins = Какие плагины установлены и какие выключены
+plugin-jdtls-name = Языковой сервер Java (jdtls)
+plugin-jdtls-about = Ошибки прямо в коде, автодополнение, описания при наведении и переход к определению для Java — и в исходниках Minecraft.
+plugin-kotlin-name = Языковой сервер Kotlin
+plugin-kotlin-about = То же самое для модов на Kotlin.
+plugin-python-name = Python
+plugin-python-about = Скрипты и дополнения для Forma Mycelium, как в Blender.
+dialog-install-plugin = Установить плагин из файла
+toast-plugin-installed = Плагин установлен: { $name }
+toast-plugin-failed = Ошибка плагина: { $error }
+toast-plugin-install-failed = Не удалось установить { $name }: { $error }
+theme-new-name = Моя тема
+toast-theme-created = Тема создана: { $path }
+toast-theme-create-failed = Не удалось создать тему: { $error }
 action-quick-theme = Быстрая смена темы…

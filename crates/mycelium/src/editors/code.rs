@@ -14,7 +14,6 @@ use forma_i18n::t;
 
 use super::code_assist;
 use crate::app::Cmd;
-use crate::lsp::install::InstallState;
 use crate::lsp::{JavaLsp, LspStatus};
 use forma_ui::theme::Palette;
 
@@ -329,7 +328,7 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
     if let Some(err) = &doc.error {
         ui.add_space(30.0);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new("📄").size(30.0).color(pal.text_faint));
+            super::big_icon(ui, "file", 30.0, pal.text_faint);
             ui.label(RichText::new(t!("code-cannot-open")).size(15.0).color(pal.heading));
             ui.label(RichText::new(err).size(12.5).color(pal.text_muted));
         });
@@ -480,11 +479,11 @@ fn lsp_banner(ui: &mut Ui, pal: &Palette, lsp: &JavaLsp, cmds: &mut Vec<Cmd>) {
     let mb = |b: u64| b as f64 / 1_048_576.0;
     let (text, color, action): (String, egui::Color32, Option<(String, Cmd)>) = match &lsp.status {
         LspStatus::Ready => return,
-        LspStatus::NotInstalled => (t!("lsp-not-installed"), pal.text_muted, Some((t!("lsp-install"), Cmd::InstallJdtls))),
-        LspStatus::Installing(InstallState::Downloading { done, total: Some(total) }) => {
+        LspStatus::NotInstalled => (t!("lsp-not-installed"), pal.text_muted, Some((t!("lsp-install"), Cmd::InstallPlugin(crate::plugins::JDTLS.into())))),
+        LspStatus::Installing(forma_plugins::Progress::Downloading { done, total: Some(total) }) => {
             (t!("lsp-downloading-of", done = format!("{:.1}", mb(*done)), total = format!("{:.1}", mb(*total))), pal.accent, None)
         }
-        LspStatus::Installing(InstallState::Downloading { done, total: None }) => (t!("lsp-downloading", done = format!("{:.1}", mb(*done))), pal.accent, None),
+        LspStatus::Installing(forma_plugins::Progress::Downloading { done, total: None }) => (t!("lsp-downloading", done = format!("{:.1}", mb(*done))), pal.accent, None),
         LspStatus::Installing(_) => (t!("lsp-extracting"), pal.accent, None),
         LspStatus::NoJdk(need) => (t!("lsp-no-jdk", version = *need), pal.warning, None),
         LspStatus::Starting => (t!("lsp-starting"), pal.text_muted, None),
@@ -499,7 +498,9 @@ fn lsp_banner(ui: &mut Ui, pal: &Palette, lsp: &JavaLsp, cmds: &mut Vec<Cmd>) {
         ui.set_width(ui.available_width());
         // Текст переносится по ширине области, кнопка — следом за ним.
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::Label::new(RichText::new(format!("☕ {text}")).size(12.0).color(color)).wrap());
+            let (r, _) = ui.allocate_exact_size(vec2(14.0, 16.0), Sense::hover());
+            forma_ui::icons::paint(ui.painter(), r, "jdk", color);
+            ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).wrap());
             if let Some((label, cmd)) = action {
                 if ui.small_button(label).clicked() {
                     cmds.push(cmd);
@@ -519,11 +520,7 @@ fn header(ui: &mut Ui, doc: &Document, rel: &str, pal: &Palette) {
     let font = FontId::proportional(12.0);
     let path = rel.replace('\\', " › ").replace('/', " › ");
     let pos = format!("{}:{}", doc.cursor.0, doc.cursor.1);
-    let mut parts: Vec<String> = Vec::new();
-    if doc.readonly() {
-        parts.push(format!("🔒 {}", t!("code-readonly")));
-    }
-    parts.push(pos.clone());
+    let mut parts: Vec<String> = vec![pos.clone()];
     if !doc.lang.is_empty() {
         parts.push(lang_name(doc.lang).to_owned());
     }
@@ -546,11 +543,26 @@ fn header(ui: &mut Ui, doc: &Document, rel: &str, pal: &Palette) {
         painter.circle_filled(egui::pos2(x, rect.center().y), 3.5, pal.accent);
         path_right = x - 10.0;
     }
-    let galley = forma_ui::widgets::elide_start(ui, &path, font, pal.editor_header_text, path_right - rect.left() - 10.0);
+    // Файл только для чтения (исходник из jar) — замок перед путём.
+    let mut path_left = rect.left() + 10.0;
+    if doc.readonly() {
+        forma_ui::icons::paint(&painter, egui::Rect::from_center_size(egui::pos2(path_left + 6.0, rect.center().y), vec2(13.0, 13.0)), "lock", pal.text_faint);
+        path_left += 18.0;
+    }
+    let galley = forma_ui::widgets::elide_start(ui, &path, font, pal.editor_header_text, path_right - path_left);
     let elided = galley.size().x + 0.5 < painter.layout_no_wrap(path.clone(), FontId::proportional(12.0), pal.editor_header_text).size().x;
-    painter.galley(egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, pal.editor_header_text);
-    if elided {
-        resp.on_hover_text(path);
+    painter.galley(egui::pos2(path_left, rect.center().y - galley.size().y / 2.0), galley, pal.editor_header_text);
+    match (elided, doc.readonly()) {
+        (true, true) => {
+            resp.on_hover_text(format!("{path}\n{}", t!("code-readonly")));
+        }
+        (true, false) => {
+            resp.on_hover_text(path);
+        }
+        (false, true) => {
+            resp.on_hover_text(t!("code-readonly"));
+        }
+        (false, false) => {}
     }
 }
 

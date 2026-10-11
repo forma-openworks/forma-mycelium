@@ -148,7 +148,7 @@ impl RunConfigsEditor {
                     }
                     let color = if r.hidden { pal.text_faint } else if selected { pal.heading } else { pal.text };
                     let painter = ui.painter().with_clip_rect(rect.shrink(2.0));
-                    painter.text(rect.left_center() + vec2(14.0, 0.0), egui::Align2::CENTER_CENTER, r.config.kind.icon(), FontId::proportional(12.5), color);
+                    forma_ui::icons::paint(&painter, egui::Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), vec2(14.0, 14.0)), r.config.kind.icon(), color);
                     let mut label = r.config.label();
                     if r.edited() {
                         label.push_str(" *");
@@ -177,14 +177,14 @@ impl RunConfigsEditor {
         });
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button(format!("＋ {}", t!("runcfg-new"))).clicked() {
+            if forma_ui::icons::text_button(ui, "add", t!("runcfg-new")).clicked() {
                 let id = self.new_id();
                 let config = RunConfig { id, name: Some(t!("runcfg-new-name")), task: String::new(), args: String::new(), kind: RunKind::Other, module: None, detected: false };
                 self.rows.push(Row { config, original: None, hidden: false });
                 self.selected = self.rows.len() - 1;
             }
             let Some(row) = self.rows.get(self.selected) else { return };
-            if ui.button("⧉").on_hover_text(t!("runcfg-duplicate")).clicked() {
+            if forma_ui::icons::button(ui, "copy", false).on_hover_text(t!("runcfg-duplicate")).clicked() {
                 let id = self.new_id();
                 let mut config = RunConfig { id, detected: false, ..row.config.clone() };
                 config.name = Some(t!("runcfg-copy-name", name = row.config.label()));
@@ -194,11 +194,11 @@ impl RunConfigsEditor {
             }
             if row.original.is_some() {
                 let hidden = row.hidden;
-                let (glyph, hint) = if hidden { ("👁", t!("runcfg-show")) } else { ("🚫", t!("runcfg-hide")) };
-                if ui.button(glyph).on_hover_text(hint).clicked() {
+                let (icon, hint) = if hidden { ("show", t!("runcfg-show")) } else { ("hide", t!("runcfg-hide")) };
+                if forma_ui::icons::button(ui, icon, false).on_hover_text(hint).clicked() {
                     self.rows[self.selected].hidden = !hidden;
                 }
-            } else if ui.button("🗑").on_hover_text(t!("runcfg-delete")).clicked() {
+            } else if forma_ui::icons::button(ui, "trash", false).on_hover_text(t!("runcfg-delete")).clicked() {
                 self.rows.remove(self.selected);
                 self.selected = self.selected.min(self.rows.len().saturating_sub(1));
             }
@@ -228,14 +228,10 @@ impl RunConfigsEditor {
         }
 
         field(ui, t!("runcfg-kind"));
-        egui::ComboBox::from_id_salt("runcfg-kind")
-            .selected_text(format!("{}  {}", row.config.kind.icon(), row.config.kind.label()))
-            .width(ui.available_width().min(220.0))
-            .show_ui(ui, |ui| {
-                for k in RunKind::ALL {
-                    ui.selectable_value(&mut row.config.kind, k, format!("{}  {}", k.icon(), k.label()));
-                }
-            });
+        let kinds: Vec<(RunKind, String, Option<&str>)> = RunKind::ALL.iter().map(|k| (*k, k.label(), Some(k.icon()))).collect();
+        if let Some(k) = forma_ui::widgets::dropdown_with_icons(ui, pal, egui::Id::new("runcfg-kind"), 220.0, &row.config.kind, &kinds) {
+            row.config.kind = k;
+        }
         ui.label(RichText::new(t!("runcfg-kind-hint")).size(11.5).color(pal.text_faint));
 
         field(ui, t!("runcfg-task"));

@@ -135,6 +135,17 @@ pub fn entry_title(e: &Entry) -> String {
     e.message.clone()
 }
 
+/// Значок и подпись одним элементом: «⚠ 3» в счётчиках, строка состояния.
+/// Нажимается целиком (`Sense::click`).
+pub fn icon_count(ui: &mut Ui, icon: &str, text: &str, size: f32, color: Color32) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(size), color);
+    let icon_side = size + 1.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(icon_side + 4.0 + galley.size().x, galley.size().y.max(icon_side)), Sense::click());
+    forma_ui::icons::paint(ui.painter(), egui::Rect::from_center_size(rect.left_center() + vec2(icon_side / 2.0, 0.0), vec2(icon_side, icon_side)), icon, color);
+    ui.painter().galley(rect.left_center() + vec2(icon_side + 4.0, -galley.size().y / 2.0), galley, color);
+    resp
+}
+
 /// Небольшая плашка: цветная точка и подпись. В ряду с переносом плашка не шире ряда:
 /// длинная подпись обрезается многоточием и целиком видна во всплывающей подсказке.
 pub fn chip(ui: &mut Ui, pal: &Palette, color: Color32, text: &str) {
@@ -178,7 +189,7 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
         explanation(ui, pal, k);
         ui.add_space(6.0);
     } else if e.noise {
-        note(ui, pal, &format!("🍃 {}", t!("noise-title")), &t!("noise-explain"), pal.text_faint);
+        note(ui, pal, "noise", &t!("noise-title"), &t!("noise-explain"), pal.text_faint);
         ui.add_space(6.0);
     }
 
@@ -188,8 +199,14 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
         ui.add(egui::Label::new(RichText::new(d).font(mono.clone()).color(pal.text_muted)).wrap());
     }
     if let Some(loc) = &e.location {
-        let text = format!("↪ {}:{}", loc.file, loc.line);
-        if ui.add(egui::Label::new(RichText::new(text).font(mono.clone()).color(pal.accent)).sense(Sense::click())).on_hover_cursor(CursorIcon::PointingHand).clicked() {
+        let text = format!("{}:{}", loc.file, loc.line);
+        let jump = ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+            forma_ui::icons::paint(ui.painter(), r, "jump", pal.accent);
+            ui.add(egui::Label::new(RichText::new(text).font(mono.clone()).color(pal.accent)).sense(Sense::click()))
+        });
+        if jump.inner.on_hover_cursor(CursorIcon::PointingHand).clicked() {
             cmds.push(Cmd::OpenFile { path: loc.file.clone().into(), line: Some(loc.line) });
         }
     }
@@ -201,11 +218,11 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
 
 /// Блок с объяснением известной проблемы.
 pub fn explanation(ui: &mut Ui, pal: &Palette, k: Known) {
-    note(ui, pal, &format!("💡 {}", known_title(k)), &known_explain(k), pal.accent);
+    note(ui, pal, "hint", &known_title(k), &known_explain(k), pal.accent);
 }
 
-/// Рамка с заголовком и пояснением в цвете `tint`.
-fn note(ui: &mut Ui, pal: &Palette, title: &str, text: &str, tint: Color32) {
+/// Рамка со значком, заголовком и пояснением в цвете `tint`.
+fn note(ui: &mut Ui, pal: &Palette, icon: &str, title: &str, text: &str, tint: Color32) {
     egui::Frame::new()
         .fill(tint.gamma_multiply(0.12))
         .stroke(Stroke::new(1.0, tint.gamma_multiply(0.35)))
@@ -213,7 +230,12 @@ fn note(ui: &mut Ui, pal: &Palette, title: &str, text: &str, tint: Color32) {
         .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(title).color(pal.heading).family(forma_ui::fonts::semibold()));
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
+                forma_ui::icons::paint(ui.painter(), egui::Rect::from_center_size(r.center(), vec2(16.0, 16.0)), icon, tint);
+                ui.add(egui::Label::new(RichText::new(title).color(pal.heading).family(forma_ui::fonts::semibold())).wrap());
+            });
             ui.add_space(2.0);
             ui.add(egui::Label::new(RichText::new(text).size(13.0).color(pal.text)).wrap());
         });

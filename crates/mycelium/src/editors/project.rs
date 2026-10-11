@@ -100,19 +100,19 @@ impl ProjectTree {
         // обрезается многоточием, а не залезает под кнопки. Если имени совсем тесно,
         // кнопки уходят на строку ниже.
         let name = RichText::new(project.name()).family(forma_ui::fonts::semibold()).color(pal.heading);
-        let buttons_w: f32 = ["⟳", "⊟", "👁"].iter().map(|g| forma_ui::widgets::button_width(ui, g, 0.0) + ui.spacing().item_spacing.x).sum::<f32>() + 16.0;
+        let buttons_w = 3.0 * (ui.spacing().interact_size.y + ui.spacing().item_spacing.x) + 16.0;
         let stacked = ui.available_width() - buttons_w < 110.0;
         let mut buttons = |ui: &mut Ui| {
             ui.add_space(6.0);
-            if ui.button("⟳").on_hover_text(t!("project-refresh")).clicked() {
+            if forma_ui::icons::button(ui, "refresh", false).on_hover_text(t!("project-refresh")).clicked() {
                 self.refresh();
                 cmds.push(Cmd::Redetect);
                 cmds.push(Cmd::SyncGradle);
             }
-            if ui.button("⊟").on_hover_text(t!("project-collapse-all")).clicked() {
+            if forma_ui::icons::button(ui, "collapse-all", false).on_hover_text(t!("project-collapse-all")).clicked() {
                 self.expanded.clear();
             }
-            let hidden = ui.add(egui::Button::new("👁").selected(self.show_hidden)).on_hover_text(if self.show_hidden {
+            let hidden = forma_ui::icons::button(ui, "show", self.show_hidden).on_hover_text(if self.show_hidden {
                 t!("project-hide-hidden")
             } else {
                 t!("project-show-hidden")
@@ -163,12 +163,12 @@ impl ProjectTree {
         }
 
         let (status, status_color) = match sync {
-            SyncState::Running { .. } => (Some(format!("⟳ {}", t!("libs-syncing"))), pal.accent),
-            SyncState::Indexing => (Some(format!("⟳ {}", t!("libs-indexing"))), pal.accent),
-            SyncState::Failed { .. } => (Some(format!("⚠ {}", t!("libs-sync-failed"))), pal.danger),
+            SyncState::Running { .. } => (Some(t!("libs-syncing")), pal.accent),
+            SyncState::Indexing => (Some(t!("libs-indexing")), pal.accent),
+            SyncState::Failed { .. } => (Some(t!("libs-sync-failed")), pal.danger),
             SyncState::Idle => (libs.map(|l| l.libs.len().to_string()), pal.text_faint),
         };
-        let header = tree_row(ui, pal, 0, Some(self.libs_open), "📚", pal.text_muted, &t!("libs-title"), pal.text, status.as_deref().map(|s| (s, status_color)), false);
+        let header = tree_row(ui, pal, 0, Some(self.libs_open), "library", pal.text_muted, &t!("libs-title"), pal.text, status.as_deref().map(|s| (s, status_color)), false);
         let header = match sync {
             SyncState::Failed { message } => header.on_hover_text(format!("{message}\n\n{}", t!("libs-sync-failed-hint"))),
             _ => header,
@@ -223,7 +223,7 @@ impl ProjectTree {
                     let sub_open = self.lib_open.contains(&sub);
                     let label = if group.kind == GroupKind::Minecraft { t!("libs-mojang") } else { t!("libs-loader-parts") };
                     let n = group.members.len().to_string();
-                    if tree_row(ui, pal, 2, Some(sub_open), "📦", pal.text_muted, &label, pal.text_muted, Some((&n, pal.text_faint)), false).clicked() {
+                    if tree_row(ui, pal, 2, Some(sub_open), "package", pal.text_muted, &label, pal.text_muted, Some((&n, pal.text_faint)), false).clicked() {
                         toggle(&mut self.lib_open, &sub);
                     }
                     if sub_open {
@@ -240,7 +240,7 @@ impl ProjectTree {
             }
         }
         if let Some(jdk) = &libs.jdk {
-            let resp = tree_row(ui, pal, 1, None, "☕", origin_color(pal, &Origin::Java), &format!("JDK {}", jdk.version), pal.text, None, false);
+            let resp = tree_row(ui, pal, 1, None, "jdk", origin_color(pal, &Origin::Java), &format!("JDK {}", jdk.version), pal.text, None, false);
             let resp = resp.on_hover_text(jdk.home.display().to_string());
             forma_ui::theme::context_menu(&resp, |ui| {
                 if ui.button(t!("project-reveal")).clicked() {
@@ -256,7 +256,7 @@ impl ProjectTree {
         let key = format!("j{lib}");
         let open = self.lib_open.contains(&key);
         let version = l.version.clone().unwrap_or_default();
-        let resp = tree_row(ui, pal, depth, Some(open), "🗄", pal.text_faint, &l.name, pal.text, Some((&version, pal.text_faint)), false);
+        let resp = tree_row(ui, pal, depth, Some(open), "jar", pal.text_faint, &l.name, pal.text, Some((&version, pal.text_faint)), false);
         let coords = match (&l.group, &l.version) {
             (Some(g), Some(v)) => format!("{g}:{}:{v}", l.jar.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()),
             _ => l.jar.display().to_string(),
@@ -291,7 +291,7 @@ impl ProjectTree {
             if node.dir {
                 let open = self.lib_open.contains(&key);
                 let resource = node.path.starts_with("assets/") || node.path.starts_with("data/") || node.path.starts_with("META-INF/");
-                let glyph = if resource { if open { "📂" } else { "📁" } } else { "▣" };
+                let glyph = if resource { if open { "folder-open" } else { "folder" } } else { "package" };
                 if tree_row(ui, pal, depth, Some(open), glyph, pal.text_faint, &node.name, pal.text, None, selected).clicked() {
                     toggle(&mut self.lib_open, &key);
                 }
@@ -300,7 +300,7 @@ impl ProjectTree {
                 }
                 continue;
             }
-            let (glyph, tint) = if node.is_class() { ("☕", Some(pal.text_muted)) } else { file_icon(&node.name, false, false) };
+            let (glyph, tint) = if node.is_class() { ("file-java", Some(pal.text_muted)) } else { file_icon(&node.name, false, false) };
             let resp = tree_row(ui, pal, depth, None, glyph, tint.unwrap_or(pal.text_faint), &node.name, pal.text, None, selected);
             if resp.clicked() {
                 self.lib_selected = Some(key.clone());
@@ -402,18 +402,19 @@ fn is_noise(name: &str) -> bool {
 
 pub fn file_icon(name: &str, dir: bool, open: bool) -> (&'static str, Option<Color32>) {
     if dir {
-        return (if open { "📂" } else { "📁" }, None);
+        return (if open { "folder-open" } else { "folder" }, None);
     }
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     let c = crate::colors::current();
     match ext.as_str() {
-        "java" => ("☕", Some(c.file_java)),
-        "kt" | "kts" => ("◆", Some(c.file_kotlin)),
-        "json" | "mcmeta" => ("{}", Some(c.file_json)),
-        "png" => ("🖼", Some(c.file_image)),
-        "toml" | "properties" | "gradle" => ("⚙", None),
-        "obj" | "mtl" => ("🎲", Some(c.file_model)),
-        _ => ("📄", None),
+        "java" => ("file-java", Some(c.file_java)),
+        "kt" | "kts" => ("file-kotlin", Some(c.file_kotlin)),
+        "json" | "mcmeta" => ("file-json", Some(c.file_json)),
+        "png" => ("file-image", Some(c.file_image)),
+        "toml" | "properties" | "gradle" => ("file-config", None),
+        "obj" | "mtl" => ("file-model", Some(c.file_model)),
+        "md" | "txt" => ("file-text", None),
+        _ => ("file", None),
     }
 }
 
@@ -452,10 +453,15 @@ fn tree_row(
     let mut x = rect.left() + 10.0 + depth as f32 * INDENT;
     let cy = rect.center().y;
     if let Some(open) = chevron {
-        painter.text(pos2(x + 5.0, cy), Align2::CENTER_CENTER, if open { "▾" } else { "▸" }, FontId::proportional(12.0), pal.text_faint);
+        let arrow = egui::Rect::from_center_size(pos2(x + 5.0, cy), vec2(12.0, 12.0));
+        forma_ui::icons::paint(painter, arrow, if open { "chevron-down" } else { "chevron-right" }, pal.text_faint);
     }
     x += 14.0;
-    painter.text(pos2(x + 7.0, cy), Align2::CENTER_CENTER, glyph, FontId::proportional(12.5), glyph_color);
+    // Значок по имени; не значок (цветная точка группы) — символом.
+    let icon = egui::Rect::from_center_size(pos2(x + 7.0, cy), vec2(14.0, 14.0));
+    if !forma_ui::icons::paint(painter, icon, glyph, glyph_color) {
+        painter.text(icon.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(12.5), glyph_color);
+    }
     x += 20.0;
     let color = if selected { pal.heading } else { text_color.lerp_to_gamma(pal.heading, hover * 0.5) };
     // Имя обрезается многоточием; приглушённая подпись справа — только если для неё есть место.

@@ -1,20 +1,16 @@
-//! Установка jdtls (Eclipse JDT Language Server) и поиск JDK для его запуска.
-//!
-//! Архив скачивается системными `curl` и `tar`: в Windows 10+ они есть в System32,
-//! так в программу не приходится тянуть HTTP- и TLS-библиотеки.
+//! jdtls (Eclipse JDT Language Server) — плагин Forma Mycelium (`plugins.rs`): проверка
+//! его папки, нужная ему Java и поиск JDK для запуска.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 
 /// Последняя сборка jdtls.
 pub const JDTLS_URL: &str = "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz";
 /// Наименьшая версия Java, на которой запускается jdtls.
 pub const MIN_JAVA: u32 = 21;
 
-/// Папка jdtls: `%LOCALAPPDATA%\Forma\Mycelium\servers\jdtls`.
-pub fn jdtls_dir() -> Option<PathBuf> {
-    crate::settings::cache_dir().map(|d| d.join("servers").join("jdtls"))
+/// Годится ли папка как jdtls: в ней есть jar запуска.
+pub fn validate(dir: &Path) -> Result<(), String> {
+    launcher(dir).map(|_| ()).ok_or_else(|| "the archive has no plugins/org.eclipse.equinox.launcher_*.jar".to_owned())
 }
 
 /// Jar запуска jdtls (`plugins/org.eclipse.equinox.launcher_*.jar`), если jdtls установлен.
@@ -67,121 +63,6 @@ pub fn config_dir(dir: &Path) -> PathBuf {
         "config_linux"
     };
     dir.join(name)
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum InstallState {
-    Downloading { done: u64, total: Option<u64> },
-    Extracting,
-    Done,
-    Failed(String),
-}
-
-/// Установка в фоне; состояние читается каждый кадр.
-pub struct Installer {
-    pub state: Arc<Mutex<InstallState>>,
-}
-
-impl Installer {
-    pub fn start(dir: PathBuf) -> Self {
-        let state = Arc::new(Mutex::new(InstallState::Downloading { done: 0, total: None }));
-        let s = state.clone();
-        std::thread::spawn(move || {
-            let result = install(&dir, &s);
-            *s.lock().expect("состояние установки") = match result {
-                Ok(()) => InstallState::Done,
-                Err(e) => InstallState::Failed(e),
-            };
-        });
-        Self { state }
-    }
-
-    pub fn state(&self) -> InstallState {
-        self.state.lock().expect("состояние установки").clone()
-    }
-}
-
-/// Системная программа: в Windows — из System32 (у Git свои `tar` и `curl`, и GNU tar
-/// принимает `C:` в пути за имя сервера).
-fn system_tool(name: &str) -> Command {
-    #[cfg(windows)]
-    {
-        let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-        let exe = root.join("System32").join(format!("{name}.exe"));
-        let mut cmd = Command::new(if exe.is_file() { exe } else { PathBuf::from(name) });
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new(name)
-    }
-}
-
-fn install(dir: &Path, state: &Mutex<InstallState>) -> Result<(), String> {
-    let parent = dir.parent().ok_or("bad install dir")?;
-    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let archive = parent.join("jdtls-download.tar.gz");
-    let _ = std::fs::remove_file(&archive);
-
-    // Размер — из заголовков, чтобы показывать проценты.
-    let total = system_tool("curl")
-        .args(["-sIL", JDTLS_URL])
-        .output()
-        .ok()
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .filter_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.trim().parse::<u64>().ok()))
-                .last()
-        });
-
-    let mut child = system_tool("curl")
-        .args(["-L", "-f", "-s", "-S", "-o"])
-        .arg(&archive)
-        .arg(JDTLS_URL)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("curl: {e}"))?;
-    let status = loop {
-        let done = std::fs::metadata(&archive).map(|m| m.len()).unwrap_or(0);
-        *state.lock().expect("состояние установки") = InstallState::Downloading { done, total };
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(150)),
-            Err(e) => return Err(e.to_string()),
-        }
-    };
-    if !status.success() {
-        let mut err = String::new();
-        if let Some(mut s) = child.stderr.take() {
-            use std::io::Read;
-            let _ = s.read_to_string(&mut err);
-        }
-        let _ = std::fs::remove_file(&archive);
-        return Err(format!("curl: {}", err.trim()));
-    }
-
-    *state.lock().expect("состояние установки") = InstallState::Extracting;
-    // Распаковываем рядом и только потом подменяем папку: прерванная установка не ломает прежнюю.
-    let staging = parent.join("jdtls-new");
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let out = system_tool("tar").arg("-xzf").arg(&archive).arg("-C").arg(&staging).output().map_err(|e| format!("tar: {e}"))?;
-    let _ = std::fs::remove_file(&archive);
-    if !out.status.success() {
-        return Err(format!("tar: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    if launcher(&staging).is_none() {
-        return Err("archive has no plugins/org.eclipse.equinox.launcher_*.jar".into());
-    }
-    let _ = std::fs::remove_dir_all(dir);
-    std::fs::rename(&staging, dir).map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 /// JDK: папка и основная версия (21, 25…).
