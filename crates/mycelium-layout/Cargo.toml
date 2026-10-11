@@ -1,0 +1,15 @@
+[package]
+name = "mycelium-layout"
+description = "Составной интерфейс Forma Mycelium в духе Blender: области, вкладки, отдельные окна"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+egui.workspace = true
+serde.workspace = true
+log.workspace = true
+mycelium-i18n.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

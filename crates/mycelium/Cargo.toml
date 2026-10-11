@@ -1,0 +1,26 @@
+[package]
+name = "mycelium"
+description = "Forma Mycelium — среда разработки модов для Minecraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Cargo не разрешает пробел в имени бинарника; «Forma Mycelium.exe» собирает `cargo xtask dist`.
+[[bin]]
+name = "forma-mycelium"
+path = "src/main.rs"
+
+[dependencies]
+mycelium-i18n.workspace = true
+mycelium-layout.workspace = true
+eframe.workspace = true
+wgpu.workspace = true
+rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[build-dependencies]
+embed-resource = "3.0.12"
