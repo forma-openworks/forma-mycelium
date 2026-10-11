@@ -3,7 +3,8 @@
 //!
 //! Discord принимает картинки только по ссылке, поэтому иконка IDE и значки загрузчиков
 //! лежат в публичном репозитории Forma Mycelium (`assets/discord/`), а иконка мода
-//! берётся из его публичного GitHub-репозитория, если она там есть.
+//! берётся из его публичного GitHub-репозитория, если она там есть. Значки загрузчиков —
+//! официальные (NeoForge и Fabric); у остальных загрузчиков маленькой картинки нет.
 //!
 //! Тексты активности всегда на английском, какой бы язык ни был выбран в IDE:
 //! их читают друзья в Discord, а не только сам моддер.
@@ -169,12 +170,12 @@ pub struct PresenceInput<'a> {
     pub links: Option<&'a ModLinks>,
 }
 
-fn loader_badge(loader: Loader) -> &'static str {
+/// Значок загрузчика в `assets/discord/`. Есть только у NeoForge и Fabric.
+fn loader_badge(loader: Loader) -> Option<&'static str> {
     match loader {
-        Loader::NeoForge => "neoforge",
-        Loader::Fabric => "fabric",
-        Loader::Forge => "forge",
-        Loader::Quilt => "quilt",
+        Loader::NeoForge => Some("neoforge"),
+        Loader::Fabric => Some("fabric"),
+        Loader::Forge | Loader::Quilt => None,
     }
 }
 
@@ -257,7 +258,7 @@ pub fn activity(input: &PresenceInput) -> Activity {
         start: Some(input.started_unix),
         large_image,
         large_text,
-        small_image: loader.map(|l| format!("{ASSETS}/{}.png", loader_badge(l))),
+        small_image: loader.and_then(loader_badge).map(|badge| format!("{ASSETS}/{badge}.png")),
         small_text,
         buttons,
     }

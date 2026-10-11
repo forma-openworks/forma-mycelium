@@ -1,8 +1,8 @@
-//! Подсветка кода: около 170 языков из набора bat (через two-face) и собственные темы
-//! в духе современных редакторов (те же, что в Forma: Holotype).
+//! Подсветка кода: около 170 языков из набора bat (через two-face). Цвета, жирный и
+//! курсив берутся из раздела `[syntax]` текущей темы.
 
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use eframe::egui::{
     self, Color32, FontId,
@@ -18,12 +18,10 @@ pub fn syntaxes() -> &'static SyntaxSet {
     SS.get_or_init(two_face::syntax::extra_newlines)
 }
 
-/// Загружает синтаксисы и темы в фоне, чтобы первый блок кода открылся без задержки.
+/// Загружает синтаксисы в фоне, чтобы первый файл открылся без задержки.
 pub fn warm_up() {
     std::thread::spawn(|| {
         syntaxes();
-        theme(true);
-        theme(false);
     });
 }
 
@@ -72,85 +70,77 @@ pub fn find(lang: &str) -> Option<&'static SyntaxReference> {
         .or_else(|| ss.syntaxes().iter().find(|s| s.name.eq_ignore_ascii_case(token)))
 }
 
-fn rgb(r: u8, g: u8, b: u8) -> Color {
-    Color { r, g, b, a: 0xFF }
+/// Классы подсветки, которые задаёт тема (раздел `[syntax]`), и их селекторы TextMate.
+pub(crate) const CLASS_SELECTORS: &[(&str, &str)] = &[
+    ("comment", "comment, punctuation.definition.comment"),
+    ("keyword", "keyword, storage.modifier, storage.type.function, keyword.control, variable.language"),
+    ("operator", "keyword.operator, punctuation.accessor, punctuation.separator.key-value"),
+    ("string", "string, punctuation.definition.string, string.quoted"),
+    ("escape", "constant.character.escape, string.regexp"),
+    ("number", "constant.numeric, constant.language, support.constant, constant.other"),
+    ("function", "entity.name.function, support.function, meta.function-call, variable.function, meta.method-call entity.name"),
+    (
+        "type",
+        "storage.type, support.type, entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, entity.name.trait, entity.other.inherited-class, support.class",
+    ),
+    ("parameter", "variable.parameter, entity.name.lifetime, storage.modifier.lifetime"),
+    ("tag", "entity.name.tag, punctuation.definition.tag"),
+    ("attribute", "entity.other.attribute-name"),
+    ("preprocessor", "meta.preprocessor, keyword.control.directive, keyword.other.directive, entity.name.macro, support.macro"),
+    ("annotation", "meta.annotation, meta.attribute, entity.name.decorator"),
+    ("punctuation", "punctuation.section, punctuation.terminator, punctuation.separator"),
+    ("heading", "markup.heading, entity.name.section"),
+    ("bold", "markup.bold"),
+    ("italic", "markup.italic"),
+    ("inserted", "markup.inserted"),
+    ("deleted", "markup.deleted, invalid"),
+    ("raw", "markup.raw, markup.inline.raw"),
+];
+
+/// Текущая тема подсветки и её номер: номер меняется вместе с темой и входит в ключ кеша.
+struct Current {
+    generation: u64,
+    theme: Arc<Theme>,
 }
 
-/// Цвета темы: (селекторы, цвет, начертание).
-fn rules(dark: bool) -> Vec<(&'static str, Color, Option<FontStyle>)> {
-    let p = |d: (u8, u8, u8), l: (u8, u8, u8)| if dark { rgb(d.0, d.1, d.2) } else { rgb(l.0, l.1, l.2) };
-    let comment = p((122, 134, 182), (128, 136, 160));
-    let keyword = p((244, 114, 182), (196, 38, 120));
-    let string = p((158, 206, 106), (34, 134, 58));
-    let number = p((255, 158, 100), (194, 94, 0));
-    let function = p((125, 207, 255), (0, 112, 182));
-    let ty = p((224, 175, 104), (156, 104, 0));
-    let param = p((255, 199, 140), (170, 90, 20));
-    let operator = p((137, 221, 255), (0, 125, 160));
-    let tag = p((247, 118, 142), (200, 40, 80));
-    let preproc = p((187, 154, 247), (124, 58, 237));
-    let punct = p((169, 177, 214), (100, 106, 120));
-    let heading = p((122, 162, 247), (37, 99, 235));
-    let red = p((247, 118, 142), (200, 30, 60));
-    vec![
-        ("comment, punctuation.definition.comment", comment, Some(FontStyle::ITALIC)),
-        ("keyword, storage.modifier, storage.type.function, keyword.control, variable.language", keyword, None),
-        ("keyword.operator, punctuation.accessor, punctuation.separator.key-value", operator, None),
-        ("string, punctuation.definition.string, string.quoted", string, None),
-        ("constant.character.escape, string.regexp", operator, None),
-        ("constant.numeric, constant.language, support.constant, constant.other", number, None),
-        (
-            "entity.name.function, support.function, meta.function-call, variable.function, meta.method-call entity.name",
-            function,
-            None,
-        ),
-        (
-            "storage.type, support.type, entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, entity.name.trait, entity.other.inherited-class, support.class",
-            ty,
-            None,
-        ),
-        ("variable.parameter, entity.name.lifetime, storage.modifier.lifetime", param, None),
-        ("entity.name.tag, punctuation.definition.tag", tag, None),
-        ("entity.other.attribute-name", ty, None),
-        ("meta.preprocessor, keyword.control.directive, keyword.other.directive, entity.name.macro, support.macro", preproc, None),
-        ("meta.annotation, meta.attribute, entity.name.decorator", preproc, None),
-        ("punctuation.section, punctuation.terminator, punctuation.separator", punct, None),
-        ("markup.heading, entity.name.section", heading, Some(FontStyle::BOLD)),
-        ("markup.bold", ty, Some(FontStyle::BOLD)),
-        ("markup.italic", keyword, Some(FontStyle::ITALIC)),
-        ("markup.inserted", string, None),
-        ("markup.deleted, invalid", red, None),
-        ("markup.raw, markup.inline.raw", function, None),
-    ]
+fn current() -> &'static RwLock<Current> {
+    static CURRENT: OnceLock<RwLock<Current>> = OnceLock::new();
+    CURRENT.get_or_init(|| RwLock::new(Current { generation: 0, theme: Arc::new(Theme::default()) }))
 }
 
-/// Тёмная или светлая тема подсветки.
-pub fn theme(dark: bool) -> &'static Theme {
-    static DARK: OnceLock<Theme> = OnceLock::new();
-    static LIGHT: OnceLock<Theme> = OnceLock::new();
-    let cell = if dark { &DARK } else { &LIGHT };
-    cell.get_or_init(|| {
-        let fg = if dark { rgb(201, 209, 224) } else { rgb(40, 44, 52) };
-        let bg = if dark { rgb(15, 17, 23) } else { rgb(248, 249, 251) };
-        Theme {
-            name: Some(if dark { "Mycelium Dark" } else { "Mycelium Light" }.to_owned()),
-            author: None,
-            settings: ThemeSettings { foreground: Some(fg), background: Some(bg), ..Default::default() },
-            scopes: rules(dark)
-                .into_iter()
-                .filter_map(|(sel, color, font_style)| {
-                    Some(ThemeItem {
-                        scope: ScopeSelectors::from_str(sel).ok()?,
-                        style: StyleModifier { foreground: Some(color), background: None, font_style },
-                    })
-                })
-                .collect(),
-        }
-    })
+fn to_syntect(c: Color32) -> Color {
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    Color { r, g, b, a }
+}
+
+/// Строит тему подсветки из темы Forma. `generation` должен меняться с каждой новой темой.
+pub fn set_theme(theme: &forma_ui::theme::Theme, generation: u64) {
+    let scopes = CLASS_SELECTORS
+        .iter()
+        .filter_map(|(class, sel)| {
+            let style = theme.syntax(class);
+            let mut font_style = FontStyle::empty();
+            font_style.set(FontStyle::BOLD, style.bold);
+            font_style.set(FontStyle::ITALIC, style.italic);
+            font_style.set(FontStyle::UNDERLINE, style.underline);
+            Some(ThemeItem {
+                scope: ScopeSelectors::from_str(sel).ok()?,
+                style: StyleModifier { foreground: Some(to_syntect(style.color)), background: None, font_style: Some(font_style) },
+            })
+        })
+        .collect();
+    let built = Theme {
+        name: Some(theme.name.clone()),
+        author: None,
+        settings: ThemeSettings { foreground: Some(to_syntect(theme.pal.editor_text)), background: Some(to_syntect(theme.pal.editor_bg)), ..Default::default() },
+        scopes,
+    };
+    let mut cur = current().write().unwrap_or_else(|e| e.into_inner());
+    *cur = Current { generation, theme: Arc::new(built) };
 }
 
 fn to_color32(c: Color) -> Color32 {
-    Color32::from_rgb(c.r, c.g, c.b)
+    Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)
 }
 
 #[derive(Default)]
@@ -160,35 +150,44 @@ struct CodeHighlighter;
 struct Key<'a> {
     code: &'a str,
     lang: &'a str,
-    dark: bool,
+    generation: u64,
     size_bits: u32,
     line_height_bits: u32,
 }
 
 impl egui::cache::ComputerMut<Key<'_>, LayoutJob> for CodeHighlighter {
     fn compute(&mut self, key: Key<'_>) -> LayoutJob {
-        build_job(key.code, key.lang, key.dark, f32::from_bits(key.size_bits), f32::from_bits(key.line_height_bits))
+        let theme = current().read().unwrap_or_else(|e| e.into_inner()).theme.clone();
+        build_job(key.code, key.lang, &theme, f32::from_bits(key.size_bits), f32::from_bits(key.line_height_bits))
     }
 }
 
 type HighlightCache = egui::cache::FrameCache<LayoutJob, CodeHighlighter>;
 
 /// Подсвеченный код для egui (с кэшированием между кадрами).
-pub fn job(ctx: &egui::Context, code: &str, lang: &str, dark: bool, size: f32, line_height: f32) -> LayoutJob {
-    let key = Key { code, lang, dark, size_bits: size.to_bits(), line_height_bits: line_height.to_bits() };
+pub fn job(ctx: &egui::Context, code: &str, lang: &str, size: f32, line_height: f32) -> LayoutJob {
+    let generation = current().read().unwrap_or_else(|e| e.into_inner()).generation;
+    let key = Key { code, lang, generation, size_bits: size.to_bits(), line_height_bits: line_height.to_bits() };
     ctx.memory_mut(|m| m.caches.cache::<HighlightCache>().get(key).clone())
 }
 
-fn build_job(code: &str, lang: &str, dark: bool, size: f32, line_height: f32) -> LayoutJob {
+fn build_job(code: &str, lang: &str, theme: &Theme, size: f32, line_height: f32) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let font = FontId::monospace(size);
-    let theme = theme(dark);
     let fg = theme.settings.foreground.map(to_color32).unwrap_or(Color32::GRAY);
-    let plain = |job: &mut LayoutJob, text: &str| {
-        job.append(text, 0.0, TextFormat { font_id: font.clone(), color: fg, line_height: Some(line_height), ..Default::default() });
+    let format = |color: Color32, style: FontStyle| {
+        let (bold, italic) = (style.contains(FontStyle::BOLD), style.contains(FontStyle::ITALIC));
+        TextFormat {
+            font_id: FontId::new(size, forma_ui::fonts::editor(bold, italic)),
+            color,
+            line_height: Some(line_height),
+            // Нет настоящего курсива у шрифта — egui наклоняет обычный.
+            italics: italic && !forma_ui::fonts::editor_has_italic(),
+            underline: if style.contains(FontStyle::UNDERLINE) { egui::Stroke::new(1.0, color) } else { egui::Stroke::NONE },
+            ..Default::default()
+        }
     };
     let Some(syntax) = find(lang) else {
-        plain(&mut job, code);
+        job.append(code, 0.0, format(fg, FontStyle::empty()));
         return job;
     };
     let mut h = HighlightLines::new(syntax, theme);
@@ -196,25 +195,10 @@ fn build_job(code: &str, lang: &str, dark: bool, size: f32, line_height: f32) ->
         match h.highlight_line(line, syntaxes()) {
             Ok(ranges) => {
                 for (style, text) in ranges {
-                    job.append(
-                        text,
-                        0.0,
-                        TextFormat {
-                            font_id: font.clone(),
-                            color: to_color32(style.foreground),
-                            line_height: Some(line_height),
-                            italics: style.font_style.contains(FontStyle::ITALIC),
-                            underline: if style.font_style.contains(FontStyle::UNDERLINE) {
-                                egui::Stroke::new(1.0, to_color32(style.foreground))
-                            } else {
-                                egui::Stroke::NONE
-                            },
-                            ..Default::default()
-                        },
-                    );
+                    job.append(text, 0.0, format(to_color32(style.foreground), style.font_style));
                 }
             }
-            Err(_) => plain(&mut job, line),
+            Err(_) => job.append(line, 0.0, format(fg, FontStyle::empty())),
         }
     }
     job
@@ -234,7 +218,10 @@ mod tests {
 
     #[test]
     fn highlights_with_colors() {
-        let job = build_job("fn main() { let x = 42; } // привет", "rust", true, 14.0, 20.0);
+        let themes = forma_ui::theme::Themes::new(crate::colors::BUILTIN_THEMES, None);
+        set_theme(&themes.resolve("vs-dark", crate::colors::DEFAULT_THEME, None), 1);
+        let theme = current().read().unwrap().theme.clone();
+        let job = build_job("fn main() { let x = 42; } // привет", "rust", &theme, 14.0, 20.0);
         let colors: std::collections::HashSet<_> = job.sections.iter().map(|s| s.format.color).collect();
         assert!(colors.len() >= 4, "слишком мало цветов: {}", colors.len());
     }

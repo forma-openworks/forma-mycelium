@@ -12,20 +12,19 @@ use crate::app::Cmd;
 use forma_ui::theme::Palette;
 
 /// Цвет происхождения — один и тот же во всей IDE.
-pub fn origin_color(pal: &Palette, origin: &Origin) -> Color32 {
-    let (d, l) = match origin {
-        Origin::OwnMod => return pal.accent,
-        Origin::Minecraft => ((106, 190, 48), (62, 140, 20)),
-        Origin::NeoForge => ((240, 138, 36), (200, 100, 10)),
-        Origin::Fabric => ((219, 198, 160), (150, 120, 70)),
-        Origin::Forge => ((96, 140, 200), (40, 90, 160)),
-        Origin::OtherMod(_) => ((232, 121, 249), (192, 38, 211)),
-        Origin::Library => ((148, 163, 184), (100, 116, 139)),
-        Origin::Java => ((190, 140, 90), (150, 95, 40)),
-        Origin::Unknown => return pal.text_faint,
-    };
-    let (r, g, b) = if pal.dark { d } else { l };
-    Color32::from_rgb(r, g, b)
+pub fn origin_color(_pal: &Palette, origin: &Origin) -> Color32 {
+    let c = crate::colors::current();
+    match origin {
+        Origin::OwnMod => c.own,
+        Origin::Minecraft => c.minecraft,
+        Origin::NeoForge => c.neoforge,
+        Origin::Fabric => c.fabric,
+        Origin::Forge => c.forge,
+        Origin::OtherMod(_) => c.other_mod,
+        Origin::Library => c.library,
+        Origin::Java => c.java,
+        Origin::Unknown => c.unknown,
+    }
 }
 
 pub fn origin_label(origin: &Origin) -> String {
@@ -60,12 +59,13 @@ pub fn system_label(system: System) -> String {
     }
 }
 
-pub fn level_color(pal: &Palette, level: Level) -> Color32 {
+pub fn level_color(_pal: &Palette, level: Level) -> Color32 {
+    let c = crate::colors::current();
     match level {
-        Level::Fatal | Level::Error => pal.danger,
-        Level::Warn => pal.warning,
-        Level::Info => pal.text_muted,
-        Level::Debug | Level::Trace => pal.text_faint,
+        Level::Fatal | Level::Error => c.level_error,
+        Level::Warn => c.level_warn,
+        Level::Info => c.level_info,
+        Level::Debug | Level::Trace => c.level_debug,
     }
 }
 
@@ -135,14 +135,20 @@ pub fn entry_title(e: &Entry) -> String {
     e.message.clone()
 }
 
-/// Небольшая плашка: цветная точка и подпись.
+/// Небольшая плашка: цветная точка и подпись. В ряду с переносом плашка не шире ряда:
+/// длинная подпись обрезается многоточием и целиком видна во всплывающей подсказке.
 pub fn chip(ui: &mut Ui, pal: &Palette, color: Color32, text: &str) {
     let font = FontId::proportional(11.5);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, pal.text_muted);
-    let (rect, _) = ui.allocate_exact_size(galley.size() + vec2(22.0, 6.0), Sense::hover());
+    let max = (ui.max_rect().width() - 24.0).max(24.0);
+    let galley = forma_ui::widgets::elide(ui, text, font, pal.text_muted, max);
+    let elided = galley.elided;
+    let (rect, resp) = ui.allocate_exact_size(galley.size() + vec2(22.0, 6.0), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(9), color.gamma_multiply(0.14));
     ui.painter().circle_filled(rect.left_center() + vec2(9.0, 0.0), 3.5, color);
     ui.painter().galley(rect.left_top() + vec2(16.0, 3.0), galley, pal.text_muted);
+    if elided {
+        resp.on_hover_text(text);
+    }
 }
 
 /// Подробности записи: плашки, сообщение, объяснение и стек-трейс.
@@ -153,11 +159,17 @@ pub fn entry_details(ui: &mut Ui, pal: &Palette, e: &Entry, libs: Option<&Librar
         chip(ui, pal, level_color(pal, e.level), lvl);
         chip(ui, pal, pal.text_faint, &system_label(e.system));
         chip(ui, pal, origin_color(pal, &e.origin), &origin_label(&e.origin));
-        if let Some(time) = &e.time {
-            ui.label(RichText::new(time).size(11.5).color(pal.text_faint));
-        }
-        if let Some(thread) = &e.thread {
-            ui.label(RichText::new(format!("· {thread}")).size(11.5).color(pal.text_faint));
+        // Время и поток — одной подписью: длинное имя потока не раздвигает узкую область,
+        // а обрезается (целиком оно во всплывающей подсказке).
+        let when: Vec<&str> = [e.time.as_deref(), e.thread.as_deref()].into_iter().flatten().collect();
+        if !when.is_empty() {
+            let text = when.join(" · ");
+            let galley = forma_ui::widgets::elide(ui, text.clone(), FontId::proportional(11.5), pal.text_faint, ui.max_rect().width());
+            let elided = galley.elided;
+            let resp = ui.add(egui::Label::new(galley).selectable(false));
+            if elided {
+                resp.on_hover_text(text);
+            }
         }
     });
     ui.add_space(6.0);
@@ -270,7 +282,8 @@ fn frame_row(ui: &mut Ui, pal: &Palette, f: &Frame, libs: Option<&Libraries>, cm
     };
     let text = format!("    at {}.{}({place})", f.class, f.method);
     let font = FontId::monospace(12.0);
-    let galley = ui.painter().layout_no_wrap(text, font, if own { pal.heading } else { pal.text_muted });
+    // Длинный кадр переносится по ширине области, а не уходит за её край.
+    let galley = ui.painter().layout(text, font, if own { pal.heading } else { pal.text_muted }, (ui.available_width() - 14.0).max(20.0));
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 14.0, galley.size().y + 2.0), if clickable { Sense::click() } else { Sense::hover() });
     let hover = clickable && resp.hovered();
     if hover {

@@ -10,19 +10,20 @@ use super::run_configs::Outcome;
 use super::{APP_TITLE, Cmd, Modal, MyceliumApp};
 use crate::actions;
 use crate::editors::EditorKind;
-use forma_ui::theme::{self, Accent, Palette, ThemeKind};
+use crate::icon::Logo;
+use forma_ui::theme::{self, Accent, Palette};
 use forma_ui::widgets;
 use crate::workspace::Builtin;
 
 /// Иконка нужного размера в пикселях экрана — так она остаётся чёткой.
-pub(super) fn icon_texture(ctx: &egui::Context, cache: &mut Option<(u32, egui::TextureHandle)>, points: f32, name: &str) -> egui::TextureHandle {
+pub(super) fn icon_texture(ctx: &egui::Context, cache: &mut Option<(u32, egui::TextureHandle)>, logo: Logo, points: f32, name: &str) -> egui::TextureHandle {
     let px = (points * ctx.pixels_per_point()).round().max(16.0) as u32;
     if let Some((size, tex)) = cache {
         if *size == px {
             return tex.clone();
         }
     }
-    let img = egui::ColorImage::from_rgba_unmultiplied([px as usize, px as usize], &crate::icon::rgba(px));
+    let img = egui::ColorImage::from_rgba_unmultiplied([px as usize, px as usize], &crate::icon::rgba(logo, px));
     let tex = ctx.load_texture(name, img, egui::TextureOptions::LINEAR);
     *cache = Some((px, tex.clone()));
     tex
@@ -31,174 +32,239 @@ pub(super) fn icon_texture(ctx: &egui::Context, cache: &mut Option<(u32, egui::T
 impl MyceliumApp {
     pub(super) fn top_bar(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
-        let mark = icon_texture(ui.ctx(), &mut self.mark, 20.0, "mycelium-mark");
-        egui::Panel::top("mycelium-top").frame(Frame::new().fill(pal.bg_panel).inner_margin(Margin::symmetric(8, 4))).show(ui, |ui| {
+        let mark = icon_texture(ui.ctx(), &mut self.mark, Logo::Simple, 20.0, "mycelium-mark");
+        egui::Panel::top("mycelium-top").frame(Frame::new().fill(pal.menubar_bg).inner_margin(Margin::symmetric(8, 4))).show(ui, |ui| {
+            let w = &mut ui.visuals_mut().widgets;
+            w.inactive.fg_stroke.color = pal.menubar_text;
+            w.hovered.fg_stroke.color = pal.menubar_text;
+            w.hovered.weak_bg_fill = pal.menubar_hover;
+            w.open.weak_bg_fill = pal.menubar_hover;
             egui::MenuBar::new().style(theme::menu_bar_style).config(theme::menu_config()).ui(ui, |ui| {
-                ui.add(egui::Image::new(egui::load::SizedTexture::new(mark.id(), vec2(20.0, 20.0))));
-                ui.add_space(4.0);
-                self.menus(ui, &pal);
-                ui.add_space(18.0);
-                self.workspace_tabs(ui, &pal);
-                if self.project.is_some() {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Место в строке делится по важности: значок и меню, кнопки запуска, текущее
+                // рабочее пространство, список конфигураций, остальные пространства. Что не
+                // поместилось — уходит в меню: пространства в «»», а меню программы в одно «☰».
+                let total = ui.available_width();
+                let gap = ui.spacing().item_spacing.x;
+                let menus_w: f32 = menu_titles().iter().map(|t| widgets::button_width(ui, t, 0.0) + gap).sum();
+                let burger_w = widgets::button_width(ui, "☰", 0.0) + gap;
+                let run_w = if self.project.is_some() { self.run_buttons_width(ui) } else { 0.0 };
+                let active_title = self.layout.workspaces[self.layout.active].title();
+                // Текущее пространство и кнопки «+» и «»» рядом с ним.
+                let tabs_min = workspace_tab_width(ui, &active_title) + 60.0;
+                let logo_w = 24.0 + gap;
+                let compact = logo_w + menus_w + 18.0 + tabs_min + run_w > total;
+                let left_w = logo_w + if compact { burger_w + 6.0 } else { menus_w + 18.0 } + tabs_min;
+                let combo = Some((total - left_w - run_w - 8.0).min(190.0)).filter(|w| *w >= 100.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if self.project.is_some() {
                         ui.horizontal(|ui| {
-                            crate::editors::console::run_bar(ui, &pal, &self.console, &self.configs, &mut self.view.run_config, &mut self.cmds);
+                            crate::editors::console::run_bar(ui, &pal, &self.console, &self.configs, &mut self.view.run_config, combo, &mut self.cmds);
                         });
+                    }
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.add(egui::Image::new(egui::load::SizedTexture::new(mark.id(), vec2(20.0, 20.0))));
+                        ui.add_space(4.0);
+                        self.menus(ui, &pal, compact);
+                        ui.add_space(if compact { 6.0 } else { 18.0 });
+                        self.workspace_tabs(ui, &pal);
                     });
-                }
+                });
             });
         });
     }
 
-    fn menus(&mut self, ui: &mut Ui, pal: &Palette) {
-        let item = |text: String, shortcut: String| egui::Button::new(text).shortcut_text(shortcut);
-        widgets::top_menu(ui, &t!("menu-file"), false, |ui| {
-            if ui.add(item(t!("action-open-project"), self.keys(actions::OPEN_PROJECT))).clicked() {
-                self.cmds.push(Cmd::OpenProjectDialog);
-            }
-            ui.menu_button(t!("menu-recent-projects"), |ui| {
-                let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
-                if recent.is_empty() {
-                    ui.label(RichText::new(t!("menu-recent-empty")).color(pal.text_faint));
-                }
-                for path in recent {
-                    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
-                        self.cmds.push(Cmd::OpenProject(path));
-                    }
-                }
+    /// Ширина кнопок запуска в верхней строке (без списка конфигураций).
+    fn run_buttons_width(&self, ui: &Ui) -> f32 {
+        let gap = ui.spacing().item_spacing.x;
+        let running = self.selected_config().is_some_and(|c| self.console.is_running_config(&c.id));
+        let mut w = widgets::button_width(ui, "▶", 0.0) + gap;
+        if running {
+            w += widgets::button_width(ui, "■", 0.0) + gap;
+        }
+        if self.console.running().count() > 1 {
+            w += widgets::button_width(ui, "■■", 0.0) + gap;
+        }
+        w
+    }
+
+    /// Меню программы. `compact` — все меню свёрнуты в одно «☰» (узкое окно).
+    fn menus(&mut self, ui: &mut Ui, pal: &Palette, compact: bool) {
+        if compact {
+            widgets::top_menu(ui, "☰", false, |ui| {
+                ui.menu_button(t!("menu-file"), |ui| self.file_menu(ui, pal));
+                ui.menu_button(t!("menu-view"), |ui| self.view_menu(ui, pal));
+                ui.menu_button(t!("menu-run"), |ui| self.run_menu(ui, pal));
+                ui.menu_button(t!("menu-window"), |ui| self.window_menu(ui));
+                ui.menu_button(t!("menu-help"), |ui| self.help_menu(ui));
             });
-            if ui.add_enabled(self.project.is_some(), item(t!("action-close-project"), self.keys(actions::CLOSE_PROJECT))).clicked() {
-                self.cmds.push(Cmd::CloseProject);
-            }
-            ui.separator();
-            if ui.add_enabled(self.project.is_some(), item(t!("action-save-all"), self.keys(actions::SAVE_ALL))).clicked() {
-                self.cmds.push(Cmd::SaveAll);
-            }
-            ui.separator();
-            if ui.add(item(t!("action-settings"), self.keys(actions::SETTINGS))).clicked() {
-                self.cmds.push(Cmd::Settings);
-            }
-            ui.menu_button(t!("menu-manage-settings"), |ui| {
-                if ui.add(item(t!("action-export-settings"), self.keys(actions::EXPORT_SETTINGS))).clicked() {
-                    self.cmds.push(Cmd::ExportSettings);
-                }
-                if ui.add(item(t!("action-import-settings"), self.keys(actions::IMPORT_SETTINGS))).clicked() {
-                    self.cmds.push(Cmd::ImportSettings);
-                }
-            });
-            ui.separator();
-            let quit = self.keys(actions::QUIT);
-            if ui.add(item(t!("action-quit"), if quit.is_empty() { "Alt+F4".to_owned() } else { quit })).clicked() {
-                self.cmds.push(Cmd::Quit);
-            }
-        });
+            return;
+        }
+        widgets::top_menu(ui, &t!("menu-file"), false, |ui| self.file_menu(ui, pal));
         // «Вид» не закрывается от переключателей, чтобы можно было поменять сразу несколько.
-        widgets::top_menu(ui, &t!("menu-view"), true, |ui| {
-            ui.menu_button(t!("settings-theme"), |ui| {
-                for (kind, label) in [(ThemeKind::Dark, t!("theme-dark")), (ThemeKind::Light, t!("theme-light"))] {
-                    if ui.add(egui::Button::new(label).selected(self.settings.appearance.theme == kind)).clicked() {
-                        self.settings.appearance.theme = kind;
-                    }
-                }
-            });
-            ui.menu_button(t!("settings-accent"), |ui| {
-                for a in Accent::ALL {
-                    let text = RichText::new(format!("●  {}", a.label())).color(a.color(pal.dark));
-                    if ui.add(egui::Button::new(text).selected(self.settings.appearance.accent == a)).clicked() {
-                        self.settings.appearance.accent = a;
-                    }
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.add_space(theme::MENU_PAD_X);
-                ui.label(t!("settings-font-size"));
-                ui.add(egui::Slider::new(&mut self.settings.appearance.font_size, 13.0..=22.0).step_by(0.5));
-                ui.add_space(theme::MENU_PAD_X);
-            });
-            ui.separator();
-            if ui.add(item(t!("action-zoom-in"), self.keys(actions::ZOOM_IN))).clicked() {
-                self.cmds.push(Cmd::ZoomIn);
+        widgets::top_menu(ui, &t!("menu-view"), true, |ui| self.view_menu(ui, pal));
+        widgets::top_menu(ui, &t!("menu-run"), false, |ui| self.run_menu(ui, pal));
+        widgets::top_menu(ui, &t!("menu-window"), false, |ui| self.window_menu(ui));
+        widgets::top_menu(ui, &t!("menu-help"), false, |ui| self.help_menu(ui));
+    }
+
+    fn file_menu(&mut self, ui: &mut Ui, pal: &Palette) {
+        if ui.add(item(t!("action-open-project"), self.keys(actions::OPEN_PROJECT))).clicked() {
+            self.cmds.push(Cmd::OpenProjectDialog);
+        }
+        ui.menu_button(t!("menu-recent-projects"), |ui| {
+            let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
+            if recent.is_empty() {
+                ui.label(RichText::new(t!("menu-recent-empty")).color(pal.text_faint));
             }
-            if ui.add(item(t!("action-zoom-out"), self.keys(actions::ZOOM_OUT))).clicked() {
-                self.cmds.push(Cmd::ZoomOut);
-            }
-            if ui.add(item(t!("action-zoom-reset"), self.keys(actions::ZOOM_RESET))).clicked() {
-                self.cmds.push(Cmd::ZoomReset);
-            }
-        });
-        widgets::top_menu(ui, &t!("menu-run"), false, |ui| {
-            if self.configs.is_empty() {
-                ui.label(RichText::new(t!("run-no-configs")).color(pal.text_faint));
-            }
-            for c in &self.configs {
-                // Идущий запуск помечен точкой; повторный выбор перезапускает его.
-                let running = self.console.is_running_config(&c.id);
-                let text = format!("{}  {}{}", c.kind.icon(), c.label(), if running { "  ●" } else { "" });
-                if ui.button(text).on_hover_text(c.command_line()).clicked() {
-                    self.cmds.push(Cmd::RunConfig(c.id.clone()));
+            for path in recent {
+                let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                    self.cmds.push(Cmd::OpenProject(path));
                 }
             }
-            ui.separator();
-            let selected_running = self.selected_config().is_some_and(|c| self.console.is_running_config(&c.id));
-            if ui.add_enabled(selected_running, item(t!("run-stop"), self.keys(actions::STOP))).clicked() {
-                self.cmds.push(Cmd::Stop);
+        });
+        if ui.add_enabled(self.project.is_some(), item(t!("action-close-project"), self.keys(actions::CLOSE_PROJECT))).clicked() {
+            self.cmds.push(Cmd::CloseProject);
+        }
+        ui.separator();
+        if ui.add_enabled(self.project.is_some(), item(t!("action-save-all"), self.keys(actions::SAVE_ALL))).clicked() {
+            self.cmds.push(Cmd::SaveAll);
+        }
+        ui.separator();
+        if ui.add(item(t!("action-settings"), self.keys(actions::SETTINGS))).clicked() {
+            self.cmds.push(Cmd::Settings);
+        }
+        ui.menu_button(t!("menu-manage-settings"), |ui| {
+            if ui.add(item(t!("action-export-settings"), self.keys(actions::EXPORT_SETTINGS))).clicked() {
+                self.cmds.push(Cmd::ExportSettings);
             }
-            if ui.add_enabled(self.console.is_running(), item(t!("run-stop-all"), self.keys(actions::STOP_ALL))).clicked() {
-                self.cmds.push(Cmd::StopAll);
-            }
-            ui.separator();
-            if ui.add_enabled(self.project.is_some(), item(format!("✎  {}", t!("run-edit-configs")), self.keys(actions::EDIT_RUN_CONFIGS))).clicked() {
-                self.cmds.push(Cmd::EditRunConfigs);
+            if ui.add(item(t!("action-import-settings"), self.keys(actions::IMPORT_SETTINGS))).clicked() {
+                self.cmds.push(Cmd::ImportSettings);
             }
         });
-        widgets::top_menu(ui, &t!("menu-window"), false, |ui| {
-            ui.menu_button(t!("menu-open-editor"), |ui| {
-                for kind in EditorKind::ALL {
-                    if ui.button(format!("{}  {}", kind.icon(), kind.title())).clicked() {
-                        self.cmds.push(Cmd::OpenEditor(kind));
-                    }
+        ui.separator();
+        let quit = self.keys(actions::QUIT);
+        if ui.add(item(t!("action-quit"), if quit.is_empty() { "Alt+F4".to_owned() } else { quit })).clicked() {
+            self.cmds.push(Cmd::Quit);
+        }
+    }
+
+    fn view_menu(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.menu_button(t!("settings-theme"), |ui| {
+            let current = if self.settings.appearance.theme.is_empty() { crate::colors::DEFAULT_THEME.to_owned() } else { self.settings.appearance.theme.clone() };
+            for th in self.themes.list() {
+                if ui.add(egui::Button::new(th.name.as_str()).selected(current == th.id)).clicked() {
+                    self.settings.appearance.theme = th.id.clone();
                 }
-            });
-            ui.separator();
-            if ui.add(item(t!("dock-maximize"), self.keys(actions::MAXIMIZE))).clicked() {
-                self.cmds.push(Cmd::ToggleMaximize);
-            }
-            if ui.add(item(t!("dock-detach"), self.keys(actions::DETACH))).clicked() {
-                self.cmds.push(Cmd::DetachFocused);
-            }
-            if ui.add_enabled(!self.layout.dock.windows.is_empty(), item(t!("action-return-windows"), self.keys(actions::RETURN_WINDOWS))).clicked() {
-                self.cmds.push(Cmd::ReturnAllWindows);
             }
             ui.separator();
-            ui.menu_button(t!("menu-new-workspace"), |ui| self.new_workspace_items(ui));
-            let builtin = self.layout.workspaces[self.layout.active].builtin.is_some();
-            if ui.add_enabled(builtin, item(t!("action-reset-workspace"), String::new())).clicked() {
-                self.cmds.push(Cmd::ResetWorkspace(self.layout.active));
-            }
-            if ui.add(item(t!("action-reset-all-workspaces"), String::new())).clicked() {
-                self.cmds.push(Cmd::ResetAllWorkspaces);
-            }
-            ui.separator();
-            if ui.add(item(t!("layout-save-default"), String::new())).on_hover_text(t!("layout-save-default-hint")).clicked() {
-                self.cmds.push(Cmd::SaveDefaultLayout);
-            }
-            if ui.add(item(t!("layout-apply-default"), String::new())).clicked() {
-                self.cmds.push(Cmd::ApplyDefaultLayout);
-            }
-            if ui.add(item(t!("layout-reset-default"), String::new())).clicked() {
-                self.cmds.push(Cmd::ResetDefaultLayout);
+            if ui.add(item(t!("action-quick-theme"), self.keys(actions::QUICK_THEME))).clicked() {
+                self.cmds.push(Cmd::QuickSwitchTheme);
+                ui.close();
             }
         });
-        widgets::top_menu(ui, &t!("menu-help"), false, |ui| {
-            if ui.add(item(t!("action-find-action"), self.keys(actions::FIND_ACTION))).clicked() {
-                self.cmds.push(Cmd::FindAction);
+        ui.menu_button(t!("settings-accent"), |ui| {
+            if ui.add(egui::Button::new(t!("settings-accent-theme")).selected(self.settings.appearance.accent.is_none())).clicked() {
+                self.settings.appearance.accent = None;
             }
-            ui.separator();
-            if ui.add(item(t!("action-about"), self.keys(actions::ABOUT))).clicked() {
-                self.cmds.push(Cmd::About);
+            for a in Accent::ALL {
+                let text = RichText::new(format!("●  {}", a.label())).color(a.color(pal.dark));
+                if ui.add(egui::Button::new(text).selected(self.settings.appearance.accent == Some(a))).clicked() {
+                    self.settings.appearance.accent = Some(a);
+                }
             }
         });
+        ui.horizontal(|ui| {
+            ui.add_space(theme::MENU_PAD_X);
+            ui.label(t!("fonts-ui-size"));
+            ui.add(egui::Slider::new(&mut self.settings.fonts.ui.size, 11.0..=22.0).step_by(0.5).suffix(" px"));
+            ui.add_space(theme::MENU_PAD_X);
+        });
+        ui.separator();
+        if ui.add(item(t!("action-zoom-in"), self.keys(actions::ZOOM_IN))).clicked() {
+            self.cmds.push(Cmd::ZoomIn);
+        }
+        if ui.add(item(t!("action-zoom-out"), self.keys(actions::ZOOM_OUT))).clicked() {
+            self.cmds.push(Cmd::ZoomOut);
+        }
+        if ui.add(item(t!("action-zoom-reset"), self.keys(actions::ZOOM_RESET))).clicked() {
+            self.cmds.push(Cmd::ZoomReset);
+        }
+    }
+
+    fn run_menu(&mut self, ui: &mut Ui, pal: &Palette) {
+        if self.configs.is_empty() {
+            ui.label(RichText::new(t!("run-no-configs")).color(pal.text_faint));
+        }
+        for c in &self.configs {
+            // Идущий запуск помечен точкой; повторный выбор перезапускает его.
+            let running = self.console.is_running_config(&c.id);
+            let text = format!("{}  {}{}", c.kind.icon(), c.label(), if running { "  ●" } else { "" });
+            if ui.button(text).on_hover_text(c.command_line()).clicked() {
+                self.cmds.push(Cmd::RunConfig(c.id.clone()));
+            }
+        }
+        ui.separator();
+        let selected_running = self.selected_config().is_some_and(|c| self.console.is_running_config(&c.id));
+        if ui.add_enabled(selected_running, item(t!("run-stop"), self.keys(actions::STOP))).clicked() {
+            self.cmds.push(Cmd::Stop);
+        }
+        if ui.add_enabled(self.console.is_running(), item(t!("run-stop-all"), self.keys(actions::STOP_ALL))).clicked() {
+            self.cmds.push(Cmd::StopAll);
+        }
+        ui.separator();
+        if ui.add_enabled(self.project.is_some(), item(format!("✎  {}", t!("run-edit-configs")), self.keys(actions::EDIT_RUN_CONFIGS))).clicked() {
+            self.cmds.push(Cmd::EditRunConfigs);
+        }
+    }
+
+    fn window_menu(&mut self, ui: &mut Ui) {
+        ui.menu_button(t!("menu-open-editor"), |ui| {
+            for kind in EditorKind::ALL {
+                if ui.button(format!("{}  {}", kind.icon(), kind.title())).clicked() {
+                    self.cmds.push(Cmd::OpenEditor(kind));
+                }
+            }
+        });
+        ui.separator();
+        if ui.add(item(t!("dock-maximize"), self.keys(actions::MAXIMIZE))).clicked() {
+            self.cmds.push(Cmd::ToggleMaximize);
+        }
+        if ui.add(item(t!("dock-detach"), self.keys(actions::DETACH))).clicked() {
+            self.cmds.push(Cmd::DetachFocused);
+        }
+        if ui.add_enabled(!self.layout.dock.windows.is_empty(), item(t!("action-return-windows"), self.keys(actions::RETURN_WINDOWS))).clicked() {
+            self.cmds.push(Cmd::ReturnAllWindows);
+        }
+        ui.separator();
+        ui.menu_button(t!("menu-new-workspace"), |ui| self.new_workspace_items(ui));
+        let builtin = self.layout.workspaces[self.layout.active].builtin.is_some();
+        if ui.add_enabled(builtin, item(t!("action-reset-workspace"), String::new())).clicked() {
+            self.cmds.push(Cmd::ResetWorkspace(self.layout.active));
+        }
+        if ui.add(item(t!("action-reset-all-workspaces"), String::new())).clicked() {
+            self.cmds.push(Cmd::ResetAllWorkspaces);
+        }
+        ui.separator();
+        if ui.add(item(t!("layout-save-default"), String::new())).on_hover_text(t!("layout-save-default-hint")).clicked() {
+            self.cmds.push(Cmd::SaveDefaultLayout);
+        }
+        if ui.add(item(t!("layout-apply-default"), String::new())).clicked() {
+            self.cmds.push(Cmd::ApplyDefaultLayout);
+        }
+        if ui.add(item(t!("layout-reset-default"), String::new())).clicked() {
+            self.cmds.push(Cmd::ResetDefaultLayout);
+        }
+    }
+
+    fn help_menu(&mut self, ui: &mut Ui) {
+        if ui.add(item(t!("action-find-action"), self.keys(actions::FIND_ACTION))).clicked() {
+            self.cmds.push(Cmd::FindAction);
+        }
+        ui.separator();
+        if ui.add(item(t!("action-about"), self.keys(actions::ABOUT))).clicked() {
+            self.cmds.push(Cmd::About);
+        }
     }
 
     fn new_workspace_items(&mut self, ui: &mut Ui) {
@@ -213,12 +279,34 @@ impl MyceliumApp {
         }
     }
 
-    /// Вкладки рабочих пространств в верхней строке, как в Blender.
+    /// Вкладки рабочих пространств в верхней строке, как в Blender. Те, что не поместились,
+    /// открываются из меню «»»; текущее пространство видно всегда.
     fn workspace_tabs(&mut self, ui: &mut Ui, pal: &Palette) {
         let count = self.layout.workspaces.len();
-        for i in 0..count {
-            let title = self.layout.workspaces[i].title();
-            let resp = workspace_tab(ui, pal, Id::new(("mycelium-workspace", i)), &title, i == self.layout.active);
+        let active = self.layout.active;
+        let titles: Vec<String> = self.layout.workspaces.iter().map(|w| w.title()).collect();
+        let gap = ui.spacing().item_spacing.x;
+        let widths: Vec<f32> = titles.iter().map(|t| workspace_tab_width(ui, t)).collect();
+        let plus_w = 24.0 + gap;
+        let more_w = 28.0 + gap;
+        let avail = ui.available_width() - plus_w;
+        let mut visible = vec![true; count];
+        if widths.iter().map(|w| w + gap).sum::<f32>() > avail {
+            // Сначала текущее, затем остальные по порядку, пока есть место.
+            let room = avail - more_w;
+            let mut used = widths[active] + gap;
+            for (i, w) in widths.iter().enumerate() {
+                visible[i] = i == active || used + w + gap <= room;
+                if i != active && visible[i] {
+                    used += w + gap;
+                }
+            }
+        }
+        // Текущее пространство в совсем узком окне сжимается до оставшегося места.
+        let active_max = (avail - if visible.iter().all(|v| *v) { 0.0 } else { more_w }).max(40.0);
+        for i in (0..count).filter(|i| visible[*i]) {
+            let max_w = if i == active { active_max } else { f32::INFINITY };
+            let resp = workspace_tab(ui, pal, Id::new(("mycelium-workspace", i)), &titles[i], i == active, max_w);
             if resp.double_clicked() {
                 self.cmds.push(Cmd::RenameWorkspace(i));
             } else if resp.clicked() {
@@ -241,133 +329,172 @@ impl MyceliumApp {
                 }
             });
         }
+        let hidden: Vec<usize> = (0..count).filter(|i| !visible[*i]).collect();
+        if !hidden.is_empty() {
+            let more = ui.add(egui::Button::new(RichText::new("»").size(15.0).color(pal.text_muted)).frame(false)).on_hover_text(t!("workspace-more", count = hidden.len()));
+            egui::Popup::menu(&more).style(theme::menu_style).show(|ui| {
+                for i in hidden {
+                    if ui.button(&titles[i]).clicked() {
+                        self.cmds.push(Cmd::SwitchWorkspace(i));
+                    }
+                }
+            });
+        }
         let plus = ui.add(egui::Button::new(RichText::new("+").size(15.0).color(pal.text_muted)).frame(false)).on_hover_text(t!("menu-new-workspace"));
         egui::Popup::menu(&plus).style(theme::menu_style).show(|ui| self.new_workspace_items(ui));
     }
 
     pub(super) fn status_bar(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
-        egui::Panel::bottom("mycelium-status").frame(Frame::new().fill(pal.bg_panel).inner_margin(Margin::symmetric(12, 3))).show(ui, |ui| {
+        egui::Panel::bottom("mycelium-status").frame(Frame::new().fill(pal.statusbar_bg).inner_margin(Margin::symmetric(12, 3))).show(ui, |ui| {
+            let small = |s: String, c: Color32| RichText::new(s).size(12.0).color(c);
+            // Справа — язык и видеокарта, слева — всё остальное. Сведения о видеокарте
+            // уступают место левой части, а левая часть обрезается по краю правой.
+            let left_id = Id::new("mycelium-status-left-width");
+            let left_w: f32 = ui.data(|d| d.get_temp(left_id)).unwrap_or(0.0);
+            let gpu_w = ui.painter().layout_no_wrap(self.gpu_info.clone(), FontId::proportional(12.0), pal.statusbar_text).size().x + 24.0;
             ui.horizontal(|ui| {
-                let small = |s: String, c: Color32| RichText::new(s).size(12.0).color(c);
-                match &self.project {
-                    Some(p) => {
-                        ui.label(small("●".into(), pal.success));
-                        ui.label(small(p.name().to_owned(), pal.text_muted)).on_hover_text(p.root.display().to_string());
-                        let info = &p.info;
-                        if info.is_mod() {
-                            let loaders: Vec<&str> = info.loaders.iter().map(|l| l.name()).collect();
-                            let mut text = loaders.join(" + ");
-                            if let Some(mc) = &info.minecraft {
-                                text.push_str(&format!(" · {mc}"));
-                            }
-                            ui.label(small(text, pal.text_faint));
-                        }
-                    }
-                    None => {
-                        ui.label(small(t!("status-no-project"), pal.text_faint));
-                    }
-                }
-                if self.sync.is_busy() {
-                    ui.label(small(format!("⟳ {}…", t!("status-syncing")), pal.accent));
-                }
-                if let Some(lsp) = &self.lsp {
-                    let (text, color) = match &lsp.status {
-                        crate::lsp::LspStatus::Ready => match lsp.problem_counts() {
-                            (0, 0) => ("☕ Java ✔".to_owned(), pal.text_faint),
-                            (e, w) => (format!("☕ ✖ {e}  ⚠ {w}"), if e > 0 { pal.danger } else { pal.warning }),
-                        },
-                        crate::lsp::LspStatus::NotInstalled => (format!("☕ {}", t!("status-lsp-off")), pal.text_faint),
-                        crate::lsp::LspStatus::Failed(_) | crate::lsp::LspStatus::NoJdk(_) => (format!("☕ {}", t!("status-lsp-error")), pal.danger),
-                        _ => (format!("☕ {}…", t!("status-lsp-busy")), pal.accent),
-                    };
-                    ui.label(small(text, color)).on_hover_text(t!("status-lsp-hint"));
-                }
-                // Все идущие запуски: «▶ Клиент · 1:23 · Сервер · 0:45».
-                let now = ui.input(|i| i.time);
-                let running: Vec<String> = self
-                    .console
-                    .running()
-                    .map(|s| {
-                        let secs = match s.status {
-                            crate::run::Status::Running { since } => (now - since).max(0.0) as u64,
-                            _ => 0,
-                        };
-                        format!("{} · {}:{:02}", s.config.label(), secs / 60, secs % 60)
-                    })
-                    .collect();
-                if !running.is_empty() {
-                    let resp = ui.add(egui::Label::new(small(format!("▶ {}", running.join("  ·  ")), pal.accent)).sense(Sense::click()));
-                    if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
-                        self.cmds.push(Cmd::OpenEditor(EditorKind::Console));
-                    }
-                }
-                // Безобидный шум Minecraft в счётчик не входит.
-                let problems: Vec<_> = self.console.problems.problems().iter().filter(|p| !p.sample.noise).collect();
-                if !problems.is_empty() {
-                    let errors = problems.iter().filter(|p| p.sample.crash || p.sample.level >= mycelium_log::Level::Error || p.sample.throwable.is_some()).count();
-                    let warnings = problems.len() - errors;
-                    let resp = ui.add(egui::Label::new(RichText::new(format!("✖ {errors}  ⚠ {warnings}")).size(12.0).color(if errors > 0 { pal.danger } else { pal.warning })).sense(Sense::click()));
-                    if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(t!("status-problems")).clicked() {
-                        self.cmds.push(Cmd::OpenEditor(EditorKind::Exceptions));
-                    }
-                }
-                let windows = self.layout.dock.windows.len();
-                if windows > 0 {
-                    ui.label(small("·".into(), pal.text_faint));
-                    ui.label(small(t!("status-detached-windows", count = windows), pal.text_faint));
-                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(small(self.gpu_info.clone(), pal.text_faint)).on_hover_text(t!("status-renderer"));
-                    ui.label(small("·".into(), pal.text_faint));
-                    ui.label(small(forma_i18n::language().to_uppercase(), pal.text_faint)).on_hover_text(t!("settings-language"));
+                    ui.label(small(forma_i18n::language().to_uppercase(), pal.statusbar_text)).on_hover_text(t!("settings-language"));
+                    if left_w + gpu_w + 40.0 <= ui.available_width() {
+                        ui.label(small("·".into(), pal.statusbar_text));
+                        ui.label(small(self.gpu_info.clone(), pal.statusbar_text)).on_hover_text(t!("status-renderer"));
+                    }
+                    let rest = ui.available_rect_before_wrap();
+                    let mut left = ui.new_child(egui::UiBuilder::new().max_rect(rest).layout(Layout::left_to_right(Align::Center)));
+                    left.set_clip_rect(rest.shrink2(vec2(0.0, -4.0)).intersect(ui.clip_rect()));
+                    self.status_left(&mut left, &pal);
+                    let w = left.min_rect().width();
+                    if (w - left_w).abs() > 0.5 {
+                        ui.data_mut(|d| d.insert_temp(left_id, w));
+                    }
                 });
             });
         });
     }
 
+    /// Левая часть строки состояния: проект, синхронизация, Java, запуски, проблемы.
+    fn status_left(&mut self, ui: &mut Ui, pal: &Palette) {
+        let small = |s: String, c: Color32| RichText::new(s).size(12.0).color(c);
+        match &self.project {
+            Some(p) => {
+                ui.label(small("●".into(), pal.success));
+                ui.label(small(p.name().to_owned(), pal.statusbar_text_strong)).on_hover_text(p.root.display().to_string());
+                let info = &p.info;
+                if info.is_mod() {
+                    let loaders: Vec<&str> = info.loaders.iter().map(|l| l.name()).collect();
+                    let mut text = loaders.join(" + ");
+                    if let Some(mc) = &info.minecraft {
+                        text.push_str(&format!(" · {mc}"));
+                    }
+                    ui.label(small(text, pal.statusbar_text));
+                }
+            }
+            None => {
+                ui.label(small(t!("status-no-project"), pal.statusbar_text));
+            }
+        }
+        if self.sync.is_busy() {
+            ui.label(small(format!("⟳ {}…", t!("status-syncing")), pal.accent));
+        }
+        if let Some(lsp) = &self.lsp {
+            let (text, color) = match &lsp.status {
+                crate::lsp::LspStatus::Ready => match lsp.problem_counts() {
+                    (0, 0) => ("☕ Java ✔".to_owned(), pal.statusbar_text),
+                    (e, w) => (format!("☕ ✖ {e}  ⚠ {w}"), if e > 0 { pal.danger } else { pal.warning }),
+                },
+                crate::lsp::LspStatus::NotInstalled => (format!("☕ {}", t!("status-lsp-off")), pal.statusbar_text),
+                crate::lsp::LspStatus::Failed(_) | crate::lsp::LspStatus::NoJdk(_) => (format!("☕ {}", t!("status-lsp-error")), pal.danger),
+                _ => (format!("☕ {}…", t!("status-lsp-busy")), pal.accent),
+            };
+            ui.label(small(text, color)).on_hover_text(t!("status-lsp-hint"));
+        }
+        // Все идущие запуски: «▶ Клиент · 1:23 · Сервер · 0:45».
+        let now = ui.input(|i| i.time);
+        let running: Vec<String> = self
+            .console
+            .running()
+            .map(|s| {
+                let secs = match s.status {
+                    crate::run::Status::Running { since } => (now - since).max(0.0) as u64,
+                    _ => 0,
+                };
+                format!("{} · {}:{:02}", s.config.label(), secs / 60, secs % 60)
+            })
+            .collect();
+        if !running.is_empty() {
+            let resp = ui.add(egui::Label::new(small(format!("▶ {}", running.join("  ·  ")), pal.accent)).sense(Sense::click()));
+            if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+                self.cmds.push(Cmd::OpenEditor(EditorKind::Console));
+            }
+        }
+        // Безобидный шум Minecraft в счётчик не входит.
+        let problems: Vec<_> = self.console.problems.problems().iter().filter(|p| !p.sample.noise).collect();
+        if !problems.is_empty() {
+            let errors = problems.iter().filter(|p| p.sample.crash || p.sample.level >= mycelium_log::Level::Error || p.sample.throwable.is_some()).count();
+            let warnings = problems.len() - errors;
+            let resp = ui.add(egui::Label::new(RichText::new(format!("✖ {errors}  ⚠ {warnings}")).size(12.0).color(if errors > 0 { pal.danger } else { pal.warning })).sense(Sense::click()));
+            if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(t!("status-problems")).clicked() {
+                self.cmds.push(Cmd::OpenEditor(EditorKind::Exceptions));
+            }
+        }
+        let windows = self.layout.dock.windows.len();
+        if windows > 0 {
+            ui.label(small("·".into(), pal.statusbar_text));
+            ui.label(small(t!("status-detached-windows", count = windows), pal.statusbar_text));
+        }
+    }
+
     pub(super) fn welcome_ui(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
-        let logo = icon_texture(ui.ctx(), &mut self.logo, 104.0, "mycelium-logo");
-        egui::CentralPanel::default().frame(Frame::new().fill(pal.bg)).show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space((ui.available_height() * 0.14).max(24.0));
-                ui.add(egui::Image::new(egui::load::SizedTexture::new(logo.id(), vec2(104.0, 104.0))));
-                ui.add_space(14.0);
-                // «FORMA» вразрядку над названием, как подпись студии.
-                ui.label(RichText::new("F O R M A").size(13.0).family(forma_ui::fonts::semibold()).color(pal.accent));
-                ui.add_space(2.0);
-                ui.label(RichText::new("Mycelium").size(38.0).family(forma_ui::fonts::bold()).color(pal.heading));
-                ui.add_space(6.0);
-                widgets::centered_text(ui, &t!("welcome-tagline"), 15.0, pal.text_muted, 460.0);
-                ui.add_space(26.0);
-                let big = |text: String| egui::Button::new(RichText::new(text).size(15.5)).min_size(vec2(300.0, 40.0)).corner_radius(10);
-                if ui.add(big(format!("📂  {}", t!("action-open-project"))).fill(pal.accent_soft)).clicked() {
-                    self.cmds.push(Cmd::OpenProjectDialog);
-                }
-                ui.add_space(6.0);
-                if ui.add(big(format!("➜  {}", t!("welcome-continue")))).clicked() {
-                    self.cmds.push(Cmd::ContinueWithoutProject);
-                }
-                let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
-                if !recent.is_empty() {
-                    ui.add_space(26.0);
-                    ui.label(RichText::new(t!("welcome-recent")).size(13.0).color(pal.text_faint));
-                    ui.add_space(4.0);
-                    for p in recent.into_iter().take(6) {
-                        let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        let resp = ui.add(egui::Button::new(RichText::new(&name).size(14.5)).frame(false)).on_hover_text(p.display().to_string());
-                        if resp.clicked() {
-                            self.cmds.push(Cmd::OpenProject(p));
+        let logo = icon_texture(ui.ctx(), &mut self.logo, Logo::Detailed, 104.0, "mycelium-logo");
+        egui::CentralPanel::default().frame(Frame::new().fill(pal.welcome_bg)).show(ui, |ui| {
+            // В низком окне экран приветствия компактнее (кнопки видны сразу) и прокручивается.
+            let height = ui.available_height();
+            let compact = height < 600.0;
+            let (logo_size, title_size, gap) = if compact { (64.0, 30.0, 14.0) } else { (104.0, 38.0, 26.0) };
+            egui::ScrollArea::vertical().id_salt("mycelium-welcome").auto_shrink(false).show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(if compact { 16.0 } else { (height * 0.14).max(24.0) });
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(logo.id(), vec2(logo_size, logo_size))));
+                    ui.add_space(if compact { 8.0 } else { 14.0 });
+                    // «FORMA» вразрядку над названием, как подпись студии.
+                    ui.label(RichText::new("F O R M A").size(13.0).family(forma_ui::fonts::semibold()).color(pal.welcome_brand));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("Mycelium").size(title_size).family(forma_ui::fonts::bold()).color(pal.welcome_title));
+                    ui.add_space(6.0);
+                    widgets::centered_text(ui, &t!("welcome-tagline"), 15.0, pal.text_muted, 460.0);
+                    ui.add_space(gap);
+                    let width = (ui.available_width() - 32.0).clamp(120.0, 300.0);
+                    let big = |text: String| egui::Button::new(RichText::new(text).size(15.5)).min_size(vec2(width, 40.0)).corner_radius(10).truncate();
+                    if ui.add(big(format!("📂  {}", t!("action-open-project"))).fill(pal.accent_soft)).clicked() {
+                        self.cmds.push(Cmd::OpenProjectDialog);
+                    }
+                    ui.add_space(6.0);
+                    if ui.add(big(format!("➜  {}", t!("welcome-continue")))).clicked() {
+                        self.cmds.push(Cmd::ContinueWithoutProject);
+                    }
+                    let recent: Vec<PathBuf> = self.settings.recent.projects.iter().filter(|p| p.is_dir()).cloned().collect();
+                    if !recent.is_empty() {
+                        ui.add_space(gap);
+                        ui.label(RichText::new(t!("welcome-recent")).size(13.0).color(pal.text_faint));
+                        ui.add_space(4.0);
+                        for p in recent.into_iter().take(6) {
+                            let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                            let resp = ui.add(egui::Button::new(RichText::new(&name).size(14.5)).frame(false).truncate()).on_hover_text(p.display().to_string());
+                            if resp.clicked() {
+                                self.cmds.push(Cmd::OpenProject(p));
+                            }
                         }
                     }
-                }
-                ui.add_space(26.0);
-                if ui.add(egui::Button::new(RichText::new(format!("⚙  {}", t!("action-settings"))).size(13.0).color(pal.text_muted)).frame(false)).clicked() {
-                    self.cmds.push(Cmd::Settings);
-                }
-                ui.add_space(4.0);
-                ui.label(RichText::new(format!("{} · {}", t!("status-renderer"), self.gpu_info)).size(12.0).color(pal.text_faint));
+                    ui.add_space(gap);
+                    if ui.add(egui::Button::new(RichText::new(format!("⚙  {}", t!("action-settings"))).size(13.0).color(pal.text_muted)).frame(false)).clicked() {
+                        self.cmds.push(Cmd::Settings);
+                    }
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(format!("{} · {}", t!("status-renderer"), self.gpu_info)).size(12.0).color(pal.text_faint));
+                    ui.add_space(16.0);
+                });
             });
         });
     }
@@ -387,33 +514,33 @@ impl MyceliumApp {
         let mut close = false;
         let margin = if matches!(modal, Modal::Settings(_)) { 0 } else { 22 };
         let frame = Frame::new()
-            .fill(pal.bg_elevated.gamma_multiply(t))
-            .stroke(Stroke::new(1.0, pal.border.gamma_multiply(t)))
+            .fill(pal.modal_bg.gamma_multiply(t))
+            .stroke(Stroke::new(1.0, pal.modal_border.gamma_multiply(t)))
             .corner_radius(CornerRadius::same(14))
             .inner_margin(Margin::same(margin));
         let mut rename_done: Option<(usize, String)> = None;
+        // Диалог не выходит за окно: что не помещается по высоте — прокручивается.
+        let max_h = (ctx.content_rect().height() - 2.0 * margin as f32 - 40.0).max(120.0);
         let resp = egui::Modal::new(Id::new("mycelium-modal"))
             .frame(frame)
-            .backdrop_color(Color32::from_black_alpha((110.0 * t) as u8))
+            .backdrop_color(pal.modal_backdrop.gamma_multiply(t))
             .show(ctx, |ui| {
                 ui.multiply_opacity(t);
                 let title = |ui: &mut Ui, text: String| {
                     ui.label(RichText::new(text).size(18.0).family(forma_ui::fonts::semibold()).color(pal.heading));
                     ui.add_space(12.0);
                 };
-                let primary = |ui: &mut Ui, text: String| {
-                    let text_color = if pal.dark { pal.bg } else { Color32::WHITE };
-                    ui.add(egui::Button::new(RichText::new(text).color(text_color)).fill(pal.accent).min_size(vec2(96.0, 30.0))).clicked()
-                };
+                let primary = |ui: &mut Ui, text: String| forma_ui::settings_window::primary_button(ui, &pal, &text).clicked();
                 match &mut modal {
                     Modal::Settings(dialog) => close = self.settings_ui(ui, &pal, dialog),
                     Modal::FindAction(find) => close = self.find_action_ui(ui, &pal, find),
-                    Modal::Export(export) => close = self.export_ui(ui, &pal, export, now),
-                    Modal::Import(import) => close = self.import_ui(ui, &pal, import),
+                    Modal::ThemeSwitcher(switcher) => close = self.theme_switcher_ui(ui, &pal, switcher),
+                    Modal::Export(export) => close = egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| self.export_ui(ui, &pal, export, now)).inner,
+                    Modal::Import(import) => close = egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| self.import_ui(ui, &pal, import)).inner,
                     Modal::About => {
-                        ui.set_width(380.0);
-                        let logo = icon_texture(ui.ctx(), &mut self.logo, 104.0, "mycelium-logo");
-                        ui.vertical_centered(|ui| {
+                        ui.set_width(modal_width(ui.ctx(), 380.0));
+                        let logo = icon_texture(ui.ctx(), &mut self.logo, Logo::Detailed, 104.0, "mycelium-logo");
+                        egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| ui.vertical_centered(|ui| {
                             ui.add(egui::Image::new(egui::load::SizedTexture::new(logo.id(), vec2(72.0, 72.0))));
                             ui.add_space(8.0);
                             ui.label(RichText::new(APP_TITLE).size(20.0).family(forma_ui::fonts::bold()).color(pal.heading));
@@ -427,11 +554,12 @@ impl MyceliumApp {
                             if primary(ui, t!("action-close")) {
                                 close = true;
                             }
-                        });
+                        }));
                     }
                     Modal::RunConfigs(editor) => {
-                        ui.set_width(760.0);
-                        match editor.ui(ui, &pal) {
+                        ui.set_width(modal_width(ui.ctx(), 760.0));
+                        let outcome = egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| editor.ui(ui, &pal)).inner;
+                        match outcome {
                             Some(Outcome::Done) => {
                                 self.runs = editor.to_file();
                                 if let Some(p) = &self.project {
@@ -450,7 +578,7 @@ impl MyceliumApp {
                         }
                     }
                     Modal::Rename { index, name } => {
-                        ui.set_width(380.0);
+                        ui.set_width(modal_width(ui.ctx(), 380.0));
                         title(ui, t!("workspace-rename-title"));
                         let r = ui.add(TextEdit::singleline(name).desired_width(f32::INFINITY).margin(Margin::symmetric(10, 7)));
                         if focus {
@@ -477,6 +605,13 @@ impl MyceliumApp {
         let escape = || resp.is_top_modal && !resp.any_popup_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
         if (sticky && escape()) || (!sticky && resp.should_close()) {
             close = true;
+        }
+        // Быструю смену темы закрыли без выбора — возвращаем прежнюю тему.
+        if let Modal::ThemeSwitcher(sw) = &modal
+            && close
+            && !sw.committed
+        {
+            self.settings.appearance.theme = sw.original().to_owned();
         }
         if let Some((index, name)) = rename_done {
             if let Some(ws) = self.layout.workspaces.get_mut(index) {
@@ -513,23 +648,46 @@ impl MyceliumApp {
             .show(ctx, |ui| {
                 ui.multiply_opacity(a);
                 Frame::new()
-                    .fill(pal.bg_elevated)
+                    .fill(pal.toast_bg)
                     .stroke(Stroke::new(1.0, color.gamma_multiply(0.6)))
                     .corner_radius(CornerRadius::same(12))
                     .inner_margin(Margin::symmetric(18, 11))
-                    .shadow(egui::Shadow { offset: [0, 6], blur: 22, spread: 0, color: Color32::from_black_alpha(70) })
+                    .shadow(egui::Shadow { offset: [0, 6], blur: 22, spread: 0, color: pal.shadow })
                     .show(ui, |ui| {
-                        ui.label(RichText::new(&t.text).color(pal.text));
+                        // Длинное уведомление переносится, а не уходит за края окна.
+                        ui.set_max_width((ctx.content_rect().width() - 80.0).clamp(120.0, 640.0));
+                        ui.add(egui::Label::new(RichText::new(&t.text).color(pal.toast_text)).wrap());
                     });
             });
         ctx.request_repaint_after_secs(if a < 1.0 { 0.0 } else { 0.5 });
     }
 }
 
+/// Ширина диалога: желаемая, но не шире окна.
+pub(super) fn modal_width(ctx: &egui::Context, want: f32) -> f32 {
+    want.min(ctx.content_rect().width() - 2.0 * 22.0 - 40.0).max(160.0)
+}
+
+/// Заголовки меню верхней строки — по ним считается, помещаются ли меню целиком.
+fn menu_titles() -> [String; 5] {
+    [t!("menu-file"), t!("menu-view"), t!("menu-run"), t!("menu-window"), t!("menu-help")]
+}
+
+/// Пункт меню с сочетанием клавиш справа.
+fn item(text: String, shortcut: String) -> egui::Button<'static> {
+    egui::Button::new(text).shortcut_text(shortcut)
+}
+
+/// Ширина вкладки рабочего пространства с названием `title`.
+fn workspace_tab_width(ui: &Ui, title: &str) -> f32 {
+    ui.painter().layout_no_wrap(title.to_owned(), FontId::proportional(13.0), Color32::WHITE).size().x + 22.0
+}
+
 /// Вкладка рабочего пространства: «таблетка», выбранная подсвечена акцентом.
-fn workspace_tab(ui: &mut Ui, pal: &Palette, id: Id, title: &str, active: bool) -> egui::Response {
+/// Не шире `max_width`: длинное название обрезается многоточием.
+fn workspace_tab(ui: &mut Ui, pal: &Palette, id: Id, title: &str, active: bool, max_width: f32) -> egui::Response {
     let font = FontId::proportional(13.0);
-    let galley = ui.painter().layout_no_wrap(title.to_owned(), font, pal.text);
+    let galley = widgets::elide(ui, title, font, pal.text, max_width - 22.0);
     let size = vec2(galley.size().x + 22.0, 24.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let resp = ui.interact(rect, id, Sense::click());
@@ -537,12 +695,12 @@ fn workspace_tab(ui: &mut Ui, pal: &Palette, id: Id, title: &str, active: bool) 
     let hover = ui.ctx().animate_bool_with_time(id.with("hover"), resp.hovered(), 0.12);
     let painter = ui.painter();
     if hover > 0.0 {
-        painter.rect_filled(rect, CornerRadius::same(7), pal.bg_hover.gamma_multiply(hover * (1.0 - a)));
+        painter.rect_filled(rect, CornerRadius::same(7), pal.workspace_tab_hover.gamma_multiply(hover * (1.0 - a)));
     }
     if a > 0.0 {
-        painter.rect_filled(rect, CornerRadius::same(7), pal.accent_soft.gamma_multiply(a));
+        painter.rect_filled(rect, CornerRadius::same(7), pal.workspace_tab_active.gamma_multiply(a));
     }
-    let color = pal.text_muted.lerp_to_gamma(pal.heading, a.max(hover * 0.6));
+    let color = pal.workspace_tab_text.lerp_to_gamma(pal.workspace_tab_active_text, a.max(hover * 0.6));
     painter.galley(rect.center() - galley.size() / 2.0, galley, color);
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }

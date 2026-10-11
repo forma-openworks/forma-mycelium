@@ -42,6 +42,10 @@ workspace-rename = Rename…
 workspace-rename-title = Workspace name
 workspace-duplicate = Duplicate
 workspace-delete = Delete
+workspace-more = { $count ->
+    [one] { $count } more workspace
+   *[other] { $count } more workspaces
+}
 
 ## Status bar
 
@@ -132,3 +136,5 @@ action-group-view = View
 action-group-window = Window
 action-group-editor = Code editor
 action-group-help = Help
+settings-component-fonts = Interface, editor and console fonts
+action-quick-theme = Quick switch theme…

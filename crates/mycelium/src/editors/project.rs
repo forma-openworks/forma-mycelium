@@ -96,30 +96,48 @@ impl ProjectTree {
             *self = Self { root: Some(project.root.clone()), show_hidden: self.show_hidden, libs_open: self.libs_open, ..Self::default() };
         }
         ui.add_space(6.0);
+        // Кнопки справа ставятся первыми, имя проекта занимает оставшееся место и
+        // обрезается многоточием, а не залезает под кнопки. Если имени совсем тесно,
+        // кнопки уходят на строку ниже.
+        let name = RichText::new(project.name()).family(forma_ui::fonts::semibold()).color(pal.heading);
+        let buttons_w: f32 = ["⟳", "⊟", "👁"].iter().map(|g| forma_ui::widgets::button_width(ui, g, 0.0) + ui.spacing().item_spacing.x).sum::<f32>() + 16.0;
+        let stacked = ui.available_width() - buttons_w < 110.0;
+        let mut buttons = |ui: &mut Ui| {
+            ui.add_space(6.0);
+            if ui.button("⟳").on_hover_text(t!("project-refresh")).clicked() {
+                self.refresh();
+                cmds.push(Cmd::Redetect);
+                cmds.push(Cmd::SyncGradle);
+            }
+            if ui.button("⊟").on_hover_text(t!("project-collapse-all")).clicked() {
+                self.expanded.clear();
+            }
+            let hidden = ui.add(egui::Button::new("👁").selected(self.show_hidden)).on_hover_text(if self.show_hidden {
+                t!("project-hide-hidden")
+            } else {
+                t!("project-show-hidden")
+            });
+            if hidden.clicked() {
+                self.show_hidden = !self.show_hidden;
+            }
+        };
+        let root_hint = project.root.display().to_string();
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            ui.label(RichText::new(project.name()).family(forma_ui::fonts::semibold()).color(pal.heading))
-                .on_hover_text(project.root.display().to_string());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(6.0);
-                if ui.button("⟳").on_hover_text(t!("project-refresh")).clicked() {
-                    self.refresh();
-                    cmds.push(Cmd::Redetect);
-                    cmds.push(Cmd::SyncGradle);
-                }
-                if ui.button("⊟").on_hover_text(t!("project-collapse-all")).clicked() {
-                    self.expanded.clear();
-                }
-                let hidden = ui.add(egui::Button::new("👁").selected(self.show_hidden)).on_hover_text(if self.show_hidden {
-                    t!("project-hide-hidden")
+                if stacked {
+                    ui.add_space(6.0);
                 } else {
-                    t!("project-show-hidden")
-                });
-                if hidden.clicked() {
-                    self.show_hidden = !self.show_hidden;
+                    buttons(ui);
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Label::new(name).truncate()).on_hover_text(root_hint);
+                });
             });
         });
+        if stacked {
+            ui.horizontal(|ui| ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| buttons(ui)));
+        }
         mod_info(ui, pal, project);
         ui.add_space(4.0);
         egui::ScrollArea::vertical().id_salt(("project-tree", tab_id)).auto_shrink(false).show(ui, |ui| {
@@ -352,8 +370,8 @@ impl ProjectTree {
 /// Сведения о моде под именем проекта: загрузчик, версии, id.
 fn mod_info(ui: &mut Ui, pal: &Palette, project: &Project) {
     let info = &project.info;
-    ui.horizontal_wrapped(|ui| {
-        ui.add_space(10.0);
+    // Отступ слева — у всех рядов плашек, а не только у первого.
+    egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 6, top: 0, bottom: 0 }).show(ui, |ui| ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(5.0, 4.0);
         if !info.is_mod() {
             let text = if info.gradle { t!("project-not-a-mod") } else { t!("project-no-gradle") };
@@ -374,7 +392,7 @@ fn mod_info(ui: &mut Ui, pal: &Palette, project: &Project) {
         if let Some(id) = &info.mod_id {
             chip(ui, pal, pal.accent, id);
         }
-    });
+    }));
 }
 
 /// Служебные папки сборки показываем приглушённо.
@@ -387,13 +405,14 @@ pub fn file_icon(name: &str, dir: bool, open: bool) -> (&'static str, Option<Col
         return (if open { "📂" } else { "📁" }, None);
     }
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let c = crate::colors::current();
     match ext.as_str() {
-        "java" => ("☕", Some(Color32::from_rgb(232, 131, 58))),
-        "kt" | "kts" => ("◆", Some(Color32::from_rgb(167, 139, 250))),
-        "json" | "mcmeta" => ("{}", Some(Color32::from_rgb(250, 204, 21))),
-        "png" => ("🖼", Some(Color32::from_rgb(52, 211, 153))),
+        "java" => ("☕", Some(c.file_java)),
+        "kt" | "kts" => ("◆", Some(c.file_kotlin)),
+        "json" | "mcmeta" => ("{}", Some(c.file_json)),
+        "png" => ("🖼", Some(c.file_image)),
         "toml" | "properties" | "gradle" => ("⚙", None),
-        "obj" | "mtl" => ("🎲", Some(Color32::from_rgb(251, 146, 60))),
+        "obj" | "mtl" => ("🎲", Some(c.file_model)),
         _ => ("📄", None),
     }
 }
@@ -426,9 +445,9 @@ fn tree_row(
     let painter = ui.painter();
     let bg_rect = rect.shrink2(vec2(4.0, 1.0));
     if selected {
-        painter.rect_filled(bg_rect, CornerRadius::same(5), pal.accent_soft);
+        painter.rect_filled(bg_rect, CornerRadius::same(5), pal.list_selected);
     } else if hover > 0.0 {
-        painter.rect_filled(bg_rect, CornerRadius::same(5), pal.bg_hover.gamma_multiply(hover));
+        painter.rect_filled(bg_rect, CornerRadius::same(5), pal.list_hover.gamma_multiply(hover));
     }
     let mut x = rect.left() + 10.0 + depth as f32 * INDENT;
     let cy = rect.center().y;
@@ -439,12 +458,21 @@ fn tree_row(
     painter.text(pos2(x + 7.0, cy), Align2::CENTER_CENTER, glyph, FontId::proportional(12.5), glyph_color);
     x += 20.0;
     let color = if selected { pal.heading } else { text_color.lerp_to_gamma(pal.heading, hover * 0.5) };
-    let clipped = painter.with_clip_rect(rect);
-    let r = clipped.text(pos2(x, cy), Align2::LEFT_CENTER, text, FontId::proportional(13.0), color);
-    if let Some((s, c)) = suffix.filter(|(s, _)| !s.is_empty()) {
-        clipped.text(pos2(r.right() + 8.0, cy), Align2::LEFT_CENTER, s, FontId::proportional(11.5), c);
+    // Имя обрезается многоточием; приглушённая подпись справа — только если для неё есть место.
+    let room = rect.right() - 6.0 - x;
+    let suffix = suffix.filter(|(s, _)| !s.is_empty()).map(|(s, c)| (painter.layout_no_wrap(s.to_owned(), FontId::proportional(11.5), c), c));
+    let full_w = painter.layout_no_wrap(text.to_owned(), FontId::proportional(13.0), color).size().x;
+    let suffix = suffix.filter(|(g, _)| full_w + 8.0 + g.size().x <= room || room - g.size().x - 8.0 >= 60.0);
+    let name_room = suffix.as_ref().map_or(room, |(g, _)| room - g.size().x - 8.0);
+    let name = forma_ui::widgets::elide(ui, text, FontId::proportional(13.0), color, name_room);
+    let elided = name.elided;
+    let name_w = name.size().x;
+    painter.galley(pos2(x, cy - name.size().y / 2.0), name, color);
+    if let Some((g, c)) = suffix {
+        painter.galley(pos2(x + name_w + 8.0, cy - g.size().y / 2.0), g, c);
     }
-    resp.on_hover_cursor(CursorIcon::PointingHand)
+    let resp = resp.on_hover_cursor(CursorIcon::PointingHand);
+    if elided { resp.on_hover_text(text) } else { resp }
 }
 
 fn toggle(set: &mut HashSet<String>, key: &str) {

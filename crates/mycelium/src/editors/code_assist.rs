@@ -194,9 +194,9 @@ pub fn after_input(doc: &Document, lsp: &mut JavaLsp, output: &TextEditOutput, c
 
 fn severity_color(pal: &Palette, s: Severity) -> Color32 {
     match s {
-        Severity::Error => pal.danger,
-        Severity::Warning => pal.warning,
-        Severity::Info | Severity::Hint => pal.text_faint,
+        Severity::Error => pal.editor_error,
+        Severity::Warning => pal.editor_warning,
+        Severity::Info | Severity::Hint => pal.editor_info,
     }
 }
 
@@ -417,7 +417,7 @@ pub fn ctrl_click(ui: &Ui, pal: &Palette, doc: &Document, lsp: &mut JavaLsp, out
                 let painter = ui.painter().with_clip_rect(ui.clip_rect());
                 for s in segs {
                     let y = s.bottom() - 1.0;
-                    painter.extend(Shape::dashed_line(&[Pos2::new(s.left(), y), Pos2::new(s.right(), y)], Stroke::new(1.0, pal.accent), 3.0, 2.0));
+                    painter.extend(Shape::dashed_line(&[Pos2::new(s.left(), y), Pos2::new(s.right(), y)], Stroke::new(1.0, pal.editor_link), 3.0, 2.0));
                 }
             }
         }
@@ -438,15 +438,14 @@ pub fn ctrl_click(ui: &Ui, pal: &Palette, doc: &Document, lsp: &mut JavaLsp, out
 
 fn kind_glyph(pal: &Palette, kind: u32) -> (&'static str, Color32) {
     match kind {
-        2 | 3 | 4 => ("ƒ", Color32::from_rgb(192, 132, 252)),
-        5 | 6 | 10 => ("◆", Color32::from_rgb(251, 146, 60)),
-        7 | 22 => ("C", Color32::from_rgb(96, 165, 250)),
-        8 => ("I", Color32::from_rgb(45, 212, 191)),
-        13 => ("E", Color32::from_rgb(250, 204, 21)),
-        20 | 21 => ("◇", Color32::from_rgb(250, 204, 21)),
-        9 => ("▣", pal.text_muted),
-        14 => ("k", pal.text_muted),
-        25 => ("T", Color32::from_rgb(96, 165, 250)),
+        2..=4 => ("ƒ", pal.completion_method),
+        5 | 6 | 10 => ("◆", pal.completion_field),
+        7 | 22 => ("C", pal.completion_class),
+        8 => ("I", pal.completion_interface),
+        13 => ("E", pal.completion_enum),
+        20 | 21 => ("◇", pal.completion_enum),
+        9 | 14 => (if kind == 9 { "▣" } else { "k" }, pal.completion_keyword),
+        25 => ("T", pal.completion_class),
         _ => ("·", pal.text_faint),
     }
 }
@@ -495,8 +494,8 @@ pub fn completion_popup(ui: &Ui, pal: &Palette, id: Id, doc: &mut Document, lsp:
         .fixed_pos(anchor.left_bottom() + vec2(-6.0, 2.0))
         .show(&ctx, |ui| {
             Frame::new()
-                .fill(pal.bg_elevated)
-                .stroke(Stroke::new(1.0, pal.border))
+                .fill(pal.popup_bg)
+                .stroke(Stroke::new(1.0, pal.popup_border))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::same(4))
                 .shadow(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(80) })
@@ -519,24 +518,24 @@ pub fn completion_popup(ui: &Ui, pal: &Palette, id: Id, doc: &mut Document, lsp:
                             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ITEM_H), Sense::click());
                             let is_sel = *i == selected;
                             if is_sel {
-                                ui.painter().rect_filled(rect, CornerRadius::same(5), pal.accent_soft);
+                                ui.painter().rect_filled(rect, CornerRadius::same(5), pal.completion_selected);
                                 if scroll_to_selected {
                                     resp.scroll_to_me(None);
                                     scrolled = true;
                                 }
                             } else if resp.hovered() {
-                                ui.painter().rect_filled(rect, CornerRadius::same(5), pal.bg_hover);
+                                ui.painter().rect_filled(rect, CornerRadius::same(5), pal.popup_hover);
                             }
                             let (glyph, color) = kind_glyph(pal, item.kind);
                             let cy = rect.center().y;
                             ui.painter().text(Pos2::new(rect.left() + 12.0, cy), Align2::CENTER_CENTER, glyph, FontId::monospace(12.0), color);
                             let painter = ui.painter().with_clip_rect(rect);
-                            let label = painter.text(Pos2::new(rect.left() + 26.0, cy), Align2::LEFT_CENTER, &item.label, FontId::monospace(12.5), pal.heading);
+                            let label = painter.text(Pos2::new(rect.left() + 26.0, cy), Align2::LEFT_CENTER, &item.label, FontId::monospace(12.5), pal.completion_text);
                             // Подпись справа — только если помещается целиком и не налезает на имя.
                             if let Some(detail) = &item.detail {
-                                let g = painter.layout_no_wrap(detail.clone(), FontId::proportional(11.5), pal.text_faint);
+                                let g = painter.layout_no_wrap(detail.clone(), FontId::proportional(11.5), pal.completion_detail);
                                 if label.right() + 16.0 + g.size().x < rect.right() - 8.0 {
-                                    painter.galley(Pos2::new(rect.right() - 8.0 - g.size().x, cy - g.size().y / 2.0), g, pal.text_faint);
+                                    painter.galley(Pos2::new(rect.right() - 8.0 - g.size().x, cy - g.size().y / 2.0), g, pal.completion_detail);
                                 }
                             }
                             if resp.clicked() {

@@ -8,3 +8,5 @@ publish = false
 
 [dependencies]
 png = "0.18.1"
+# Иконка Forma Mycelium берётся из рисунков в assets/logo.
+image = { version = "0.25", default-features = false, features = ["webp"] }

@@ -6,6 +6,7 @@
 //! в папке настроек.
 
 mod chrome;
+mod look;
 mod run_configs;
 mod settings_dialog;
 
@@ -28,19 +29,21 @@ use crate::run::{self, Console, RunConfig, RunsFile};
 use run_configs::RunConfigsEditor;
 use settings_dialog::{ExportDialog, ImportDialog, SettingsDialog};
 use crate::actions;
+use crate::colors::{BUILTIN_THEMES, DEFAULT_THEME, ModColors};
 use crate::settings::{self, Settings};
 use crate::discord::{self, ModLinks, PresenceInput, Presence};
 use crate::lsp::{JavaLsp, LspEvent, LspStatus};
 use crate::sync::{GradleSync, SyncResult};
-use forma_ui::theme::{self, Accent, Palette, ThemeKind};
+use forma_ui::fonts::Choice;
+use forma_ui::theme::{self, Accent, Palette, Theme, Themes};
 use crate::workspace::{self, Builtin, Layout, ViewState, Workspace};
 
 pub const APP_TITLE: &str = "Forma Mycelium";
 
-/// Иконка окна и панели задач (сама картинка рисуется в `icon.rs`).
+/// Иконка окна и панели задач. Там она маленькая — поэтому упрощённый рисунок.
 pub fn app_icon() -> egui::IconData {
     let size = 256;
-    egui::IconData { rgba: crate::icon::rgba(size), width: size, height: size }
+    egui::IconData { rgba: crate::icon::rgba(crate::icon::Logo::Simple, size), width: size, height: size }
 }
 
 /// Действия, которые копятся за кадр и выполняются в его конце.
@@ -103,6 +106,10 @@ pub enum Cmd {
     ZoomIn,
     ZoomOut,
     ZoomReset,
+    /// Быстрая смена темы с предпросмотром.
+    QuickSwitchTheme,
+    /// Ctrl+колёсико в редакторе или консоли: размер шрифта на `step` пикселей.
+    FontZoom { console: bool, step: f32 },
     About,
     Quit,
 }
@@ -127,6 +134,7 @@ pub fn action_cmd(id: &str) -> Option<Cmd> {
         ZOOM_IN => Cmd::ZoomIn,
         ZOOM_OUT => Cmd::ZoomOut,
         ZOOM_RESET => Cmd::ZoomReset,
+        QUICK_THEME => Cmd::QuickSwitchTheme,
         SHOW_PROJECT => Cmd::OpenEditor(EditorKind::Project),
         SHOW_CONSOLE => Cmd::OpenEditor(EditorKind::Console),
         SHOW_EXCEPTIONS => Cmd::OpenEditor(EditorKind::Exceptions),
@@ -142,6 +150,7 @@ pub fn action_cmd(id: &str) -> Option<Cmd> {
 enum Modal {
     Settings(Box<SettingsDialog>),
     FindAction(FindAction),
+    ThemeSwitcher(look::ThemeSwitcher),
     Export(ExportDialog),
     Import(Box<ImportDialog>),
     About,
@@ -155,6 +164,16 @@ struct Toast {
     until: f64,
 }
 
+/// От чего зависит оформление: при изменении тема вычисляется заново.
+#[derive(Clone, Debug, PartialEq)]
+struct StyleKey {
+    theme: String,
+    accent: Option<Accent>,
+    themes_rev: u64,
+    ui_size: u32,
+    max_keys: Vec<Shortcut>,
+}
+
 pub struct MyceliumApp {
     /// Контекст egui — фоновые задачи будят им интерфейс.
     ctx: egui::Context,
@@ -165,8 +184,20 @@ pub struct MyceliumApp {
     actions: Registry,
     /// Последняя открытая страница настроек.
     settings_page: String,
+    /// Встроенные и свои темы.
+    themes: Themes,
+    /// Номер изменения своих тем: растёт, когда файл темы поменяли на диске.
+    themes_rev: u64,
+    /// Текущая тема и её цвета интерфейса.
+    theme: Theme,
     pal: Palette,
-    style_key: Option<(ThemeKind, Accent, u32, Vec<Shortcut>)>,
+    /// Номер темы для кеша подсветки кода.
+    theme_gen: u64,
+    style_key: Option<StyleKey>,
+    /// Установленные шрифты.
+    fonts_key: Option<Choice>,
+    /// Фоновая картинка, загруженная в видеопамять.
+    backdrop: look::Backdrop,
     icon: Arc<egui::IconData>,
     dock_style: DockStyle,
     layout: Layout,
@@ -204,6 +235,11 @@ pub struct MyceliumApp {
     mark: Option<(u32, egui::TextureHandle)>,
 }
 
+/// Какие шрифты ставить: свои из настроек или шрифты темы.
+fn font_choice(f: &forma_ui::fonts::Fonts, theme: &forma_ui::theme::FontsSpec) -> Choice {
+    Choice { ui: f.ui.effective(theme.ui.as_deref()), editor: f.editor.effective(theme.editor.as_deref()), console: f.console.effective(theme.console.as_deref()) }
+}
+
 /// Раскладка без проекта.
 fn global_layout_path() -> Option<PathBuf> {
     settings::config_dir().map(|d| d.join("layout.json"))
@@ -226,8 +262,9 @@ fn default_layout() -> Layout {
 impl MyceliumApp {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, store: Store, project_arg: Option<PathBuf>) -> Self {
         let ctx = &cc.egui_ctx;
-        forma_ui::fonts::install(ctx);
         crate::highlight::warm_up();
+        // Список шрифтов системы нужен странице «Шрифты» и темам со своими шрифтами.
+        forma_ui::fonts::warm_up();
         // Масштаб и выход — действия из раскладки клавиш, а не встроенные сочетания egui:
         // иначе случайное Ctrl+Q молча закрывало бы программу.
         ctx.options_mut(|o| {
@@ -235,7 +272,12 @@ impl MyceliumApp {
             o.quit_shortcuts.clear();
         });
         ctx.set_zoom_factor(settings.appearance.zoom.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
-        let pal = Palette::new(settings.appearance.theme, settings.appearance.accent);
+        let themes = Themes::new(BUILTIN_THEMES, settings::user_themes_dir());
+        let theme = themes.resolve(&settings.appearance.theme, DEFAULT_THEME, settings.appearance.accent);
+        let pal = theme.pal.clone();
+        // Шрифты нужны уже в первом кадре: egui применяет новые шрифты только со следующего.
+        let fonts_choice = font_choice(&settings.fonts, &theme.fonts);
+        forma_ui::fonts::install(ctx, &fonts_choice);
         let icon = Arc::new(app_icon());
         let actions = actions::registry();
         let dock_style = pal.dock_style(APP_TITLE, icon.clone(), Vec::new(), String::new());
@@ -255,8 +297,14 @@ impl MyceliumApp {
             store,
             actions,
             settings_page: forma_ui::appearance::PAGE.to_owned(),
+            themes,
+            themes_rev: 0,
+            theme,
             pal,
+            theme_gen: 0,
             style_key: None,
+            fonts_key: Some(fonts_choice),
+            backdrop: look::Backdrop::default(),
             icon,
             dock_style,
             layout,
@@ -764,6 +812,11 @@ impl MyceliumApp {
                 Cmd::ZoomIn => self.set_zoom(ctx, self.settings.appearance.zoom + 0.1),
                 Cmd::ZoomOut => self.set_zoom(ctx, self.settings.appearance.zoom - 0.1),
                 Cmd::ZoomReset => self.set_zoom(ctx, 1.0),
+                Cmd::QuickSwitchTheme => self.modal = Some(Modal::ThemeSwitcher(look::ThemeSwitcher::new(&self.settings.appearance.theme, &self.themes))),
+                Cmd::FontZoom { console, step } => {
+                    let slot = if console { &mut self.settings.fonts.console } else { &mut self.settings.fonts.editor };
+                    slot.size = (slot.size + step).clamp(*forma_ui::fonts::SIZE_RANGE.start(), *forma_ui::fonts::SIZE_RANGE.end());
+                }
                 Cmd::About => self.modal = Some(Modal::About),
                 Cmd::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             }
@@ -834,16 +887,35 @@ impl MyceliumApp {
         self.settings.keymap.text(&self.actions, id)
     }
 
+    /// Тема, цвета, шрифты: пересчитываются, когда меняется что-то, от чего они зависят
+    /// (в том числе файл своей темы на диске).
     fn apply_style(&mut self, ctx: &egui::Context) {
+        if self.themes.poll(Self::now(ctx)) {
+            self.themes_rev += 1;
+        }
         let a = &self.settings.appearance;
-        let max_keys = self.settings.keymap.shortcuts(&self.actions, actions::MAXIMIZE).to_vec();
-        let key = (a.theme, a.accent, a.font_size.to_bits(), max_keys);
+        let key = StyleKey {
+            theme: a.theme.clone(),
+            accent: a.accent,
+            themes_rev: self.themes_rev,
+            ui_size: self.settings.fonts.ui.size.to_bits(),
+            max_keys: self.settings.keymap.shortcuts(&self.actions, actions::MAXIMIZE).to_vec(),
+        };
         if self.style_key.as_ref() != Some(&key) {
-            self.pal = Palette::new(a.theme, a.accent);
-            let text = key.3.first().map(ToString::to_string).unwrap_or_default();
-            self.dock_style = self.pal.dock_style(APP_TITLE, self.icon.clone(), key.3.iter().map(Shortcut::to_egui).collect(), text);
-            theme::apply(ctx, &self.pal, a.font_size);
+            self.theme = self.themes.resolve(&key.theme, DEFAULT_THEME, key.accent);
+            self.pal = self.theme.pal.clone();
+            self.theme_gen += 1;
+            crate::highlight::set_theme(&self.theme, self.theme_gen);
+            crate::colors::set(self.theme.group(ModColors::TOKENS, ModColors::resolve));
+            let text = key.max_keys.first().map(ToString::to_string).unwrap_or_default();
+            self.dock_style = self.pal.dock_style(APP_TITLE, self.icon.clone(), key.max_keys.iter().map(Shortcut::to_egui).collect(), text);
+            theme::apply(ctx, &self.pal, self.settings.fonts.ui.size);
             self.style_key = Some(key);
+        }
+        let choice = font_choice(&self.settings.fonts, &self.theme.fonts);
+        if self.fonts_key.as_ref() != Some(&choice) {
+            forma_ui::fonts::install(ctx, &choice);
+            self.fonts_key = Some(choice);
         }
     }
 
@@ -993,12 +1065,12 @@ impl MyceliumApp {
             configs: &self.configs,
             run_config: &mut self.view.run_config,
             states: &mut self.states,
-            font_size: self.settings.appearance.font_size,
+            fonts: &self.settings.fonts,
             now,
         };
         let dock = &mut self.layout.dock;
         let style = &self.dock_style;
-        egui::CentralPanel::default().frame(Frame::new().fill(self.pal.bg_deep)).show(ui, |ui| {
+        egui::CentralPanel::default().frame(Frame::new().fill(self.pal.window_bg)).show(ui, |ui| {
             dock.show_main(ui, &mut ws.surface, &mut viewer, style);
         });
         dock.show_windows(ctx, &mut viewer, style);
@@ -1024,6 +1096,7 @@ impl eframe::App for MyceliumApp {
             self.status_bar(ui);
             self.dock_ui(ui, &ctx, now);
         }
+        self.paint_backdrop(&ctx);
         self.modals(&ctx);
         self.toast_ui(&ctx);
         self.process_cmds(&ctx);
@@ -1044,7 +1117,7 @@ impl eframe::App for MyceliumApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.pal.bg_deep.to_normalized_gamma_f32()
+        self.pal.window_bg.to_normalized_gamma_f32()
     }
 }
 

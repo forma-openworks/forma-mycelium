@@ -32,6 +32,7 @@ console-level-info = INFO и серьёзнее
 console-level-warn = Предупреждения и ошибки
 console-level-error = Только ошибки
 console-search = Поиск
+console-filters = Фильтры
 console-show-in-exceptions = Показать в окне исключений
 
 exceptions-by-system = Система

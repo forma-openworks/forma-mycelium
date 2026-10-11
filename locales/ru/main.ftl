@@ -42,6 +42,11 @@ workspace-rename = Переименовать…
 workspace-rename-title = Название пространства
 workspace-duplicate = Дублировать
 workspace-delete = Удалить
+workspace-more = { $count ->
+    [one] Ещё { $count } рабочее пространство
+    [few] Ещё { $count } рабочих пространства
+   *[many] Ещё { $count } рабочих пространств
+}
 
 ## Строка состояния
 
@@ -133,3 +138,5 @@ action-group-view = Вид
 action-group-window = Окно
 action-group-editor = Редактор кода
 action-group-help = Справка
+settings-component-fonts = Шрифты интерфейса, редактора и консоли
+action-quick-theme = Быстрая смена темы…

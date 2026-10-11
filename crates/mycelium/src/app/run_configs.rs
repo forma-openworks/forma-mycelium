@@ -2,7 +2,7 @@
 //! поменять им задачу и аргументы, скрыть и вернуть как было; свои — добавить, скопировать
 //! и удалить. Всё сохраняется в `.mycelium/runs.json`.
 
-use eframe::egui::{self, Color32, CornerRadius, CursorIcon, FontId, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
+use eframe::egui::{self, CornerRadius, CursorIcon, FontId, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
 use forma_i18n::t;
 
 use crate::run::{RunConfig, RunKind, RunsFile};
@@ -96,40 +96,55 @@ impl RunConfigsEditor {
         let mut outcome = None;
         ui.label(RichText::new(t!("runcfg-title")).size(18.0).family(forma_ui::fonts::semibold()).color(pal.heading));
         ui.add_space(10.0);
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(vec2(240.0, 380.0), egui::Layout::top_down(egui::Align::Min), |ui| self.list(ui, pal));
-            ui.add_space(14.0);
-            ui.allocate_ui_with_layout(vec2(ui.available_width(), 380.0), egui::Layout::top_down(egui::Align::Min), |ui| self.form(ui, pal));
-        });
-        ui.add_space(14.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let text_color = if pal.dark { pal.bg } else { Color32::WHITE };
-            if ui.add(egui::Button::new(RichText::new(t!("action-done")).color(text_color)).fill(pal.accent).min_size(vec2(96.0, 30.0))).clicked() {
-                outcome = Some(Outcome::Done);
-            }
-            if ui.add(egui::Button::new(t!("action-cancel")).min_size(vec2(84.0, 30.0))).clicked() {
-                outcome = Some(Outcome::Cancel);
-            }
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.label(RichText::new(t!("runcfg-saved-in")).size(11.5).color(pal.text_faint));
+        // В широком окне список слева от полей, в узком — над ними.
+        if ui.available_width() >= 560.0 {
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(vec2(240.0, 380.0), egui::Layout::top_down(egui::Align::Min), |ui| self.list(ui, pal, 232.0, 320.0));
+                ui.add_space(14.0);
+                ui.allocate_ui_with_layout(vec2(ui.available_width(), 380.0), egui::Layout::top_down(egui::Align::Min), |ui| self.form(ui, pal));
             });
-        });
+        } else {
+            let width = ui.available_width();
+            self.list(ui, pal, width - 8.0, 150.0);
+            ui.add_space(10.0);
+            self.form(ui, pal);
+        }
+        ui.add_space(14.0);
+        let mut done = false;
+        let mut cancel = false;
+        forma_ui::widgets::bar(
+            ui,
+            egui::Id::new("mycelium-runcfg-footer"),
+            0.0,
+            |ui| {
+                ui.label(RichText::new(t!("runcfg-saved-in")).size(11.5).color(pal.text_faint));
+            },
+            |ui| {
+                done = forma_ui::settings_window::primary_button(ui, pal, &t!("action-done")).clicked();
+                cancel = ui.add(egui::Button::new(t!("action-cancel")).min_size(vec2(84.0, 30.0))).clicked();
+            },
+        );
+        if done {
+            outcome = Some(Outcome::Done);
+        } else if cancel {
+            outcome = Some(Outcome::Cancel);
+        }
         outcome
     }
 
-    /// Список слева и кнопки под ним.
-    fn list(&mut self, ui: &mut Ui, pal: &Palette) {
+    /// Список конфигураций шириной `width` и высотой не больше `height`, кнопки под ним.
+    fn list(&mut self, ui: &mut Ui, pal: &Palette, width: f32, height: f32) {
         egui::Frame::new().fill(pal.bg_deep).corner_radius(8).inner_margin(Margin::same(4)).stroke(Stroke::new(1.0, pal.border)).show(ui, |ui| {
-            ui.set_width(232.0);
-            egui::ScrollArea::vertical().max_height(320.0).auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_width(width);
+            egui::ScrollArea::vertical().max_height(height).auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 for (i, r) in self.rows.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
                     let selected = i == self.selected;
                     if selected {
-                        ui.painter().rect_filled(rect, CornerRadius::same(6), pal.accent_soft);
+                        ui.painter().rect_filled(rect, CornerRadius::same(6), pal.list_selected);
                     } else if resp.hovered() {
-                        ui.painter().rect_filled(rect, CornerRadius::same(6), pal.bg_hover);
+                        ui.painter().rect_filled(rect, CornerRadius::same(6), pal.list_hover);
                     }
                     let color = if r.hidden { pal.text_faint } else if selected { pal.heading } else { pal.text };
                     let painter = ui.painter().with_clip_rect(rect.shrink(2.0));
@@ -138,7 +153,6 @@ impl RunConfigsEditor {
                     if r.edited() {
                         label.push_str(" *");
                     }
-                    let name = painter.text(rect.left_center() + vec2(28.0, 0.0), egui::Align2::LEFT_CENTER, label, FontId::proportional(13.0), color);
                     let tag = if r.hidden {
                         Some(t!("runcfg-hidden"))
                     } else if r.original.is_some() {
@@ -146,8 +160,14 @@ impl RunConfigsEditor {
                     } else {
                         None
                     };
-                    if let Some(tag) = tag {
-                        painter.text(egui::pos2(name.right() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, tag, FontId::proportional(10.5), pal.text_faint);
+                    // Название обрезается, чтобы метка «Gradle» или «скрыта» осталась видна.
+                    let tag = tag.map(|t| painter.layout_no_wrap(t, FontId::proportional(10.5), pal.text_faint));
+                    let room = rect.width() - 28.0 - 6.0 - tag.as_ref().map_or(0.0, |g| g.size().x + 6.0);
+                    let name = forma_ui::widgets::elide(ui, label, FontId::proportional(13.0), color, room);
+                    let name_w = name.size().x;
+                    painter.galley(egui::pos2(rect.left() + 28.0, rect.center().y - name.size().y / 2.0), name, color);
+                    if let Some(g) = tag {
+                        painter.galley(egui::pos2(rect.left() + 28.0 + name_w + 6.0, rect.center().y - g.size().y / 2.0), g, pal.text_faint);
                     }
                     if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(r.config.command_line()).clicked() {
                         self.selected = i;
@@ -210,7 +230,7 @@ impl RunConfigsEditor {
         field(ui, t!("runcfg-kind"));
         egui::ComboBox::from_id_salt("runcfg-kind")
             .selected_text(format!("{}  {}", row.config.kind.icon(), row.config.kind.label()))
-            .width(220.0)
+            .width(ui.available_width().min(220.0))
             .show_ui(ui, |ui| {
                 for k in RunKind::ALL {
                     ui.selectable_value(&mut row.config.kind, k, format!("{}  {}", k.icon(), k.label()));

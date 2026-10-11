@@ -77,7 +77,14 @@ The name comes from mycelium, the network that quietly connects everything aroun
 - **A layout in the spirit of Blender.** Any area splits into tabs. Tabs can be dragged between areas or torn out into separate OS windows.
 - **Workspaces** (Code, Map, Assets, Debug), each with its own layout. A layout can be saved per project, or as the default for all projects.
 - **Discord Rich Presence:** "Mod: Your Mod (yourmod)" with a live status (writing code, running the client, fixing a crash…), a timer and the loader badge. It can be turned off, and a project can be marked secret.
-- **English and Russian UI,** switchable on the fly. Extra languages can be added as Fluent files.
+- **English and Russian UI,** switchable on the fly, plus **English · Russian hints**: menus and terms stay in English, as in modding guides, while hints and explanations are in Russian. Extra languages can be added as Fluent files.
+- **Themes where everything can be restyled:**
+  - built-in themes: Mycelium Dark Default, Mycelium Light Default and Visual Studio Dark;
+  - your own themes are `.toml` files that override only what they change, so a pink menu bar is literally one line (`"menubar.bg" = "#ff69b4"`). They reload as soon as you save them;
+  - a theme sets every region (menu bar, status bar, tabs, editor, popups, buttons, console, origin colors), code highlighting with bold and italic, and optionally its own fonts and background picture;
+  - **Quick switch theme** (``Ctrl+` ``): hover or use the arrows to preview, Enter keeps it, Esc brings the old one back.
+- **Fonts:** separate fonts for the interface, the code editor and the console, picked from the fonts installed on your system, with size in pixels and line height. `Ctrl+mouse wheel` resizes the editor and console font.
+- **A background picture,** drawn semi-transparent over the window, like in Rider.
 - **Settings in the spirit of JetBrains IDEs:**
   - a settings window with a page tree and search across every option;
   - changes are applied with Apply or OK and discarded with Cancel;
@@ -92,7 +99,8 @@ The name comes from mycelium, the network that quietly connects everything aroun
 3. 🔧 **Forma platform (in progress):**
    - ✅ settings grouped as in Rider, export and import;
    - ✅ a keymap and Find Action;
-   - themes where everything can be restyled: syntax, icons, fonts, background image;
+   - ✅ themes where everything can be restyled, three independent fonts, a background picture;
+   - an SVG icon set that themes can replace;
    - plugins: themes, new windows, Python scripting. Heavy tools such as jdtls become optional plugins.
 4. **Hyphae, the knowledge engine.** It understands the whole mod:
    - which mod every class, resource and log line belongs to;
@@ -142,6 +150,7 @@ The defaults follow IntelliJ IDEA. Every one of them can be changed in **Setting
 | Action | Shortcut |
 |---|---|
 | Find action | `Ctrl+Shift+A` |
+| Quick switch theme | ``Ctrl+` `` |
 | Settings | `Ctrl+Alt+S` |
 | Run / stop | `Shift+F10` / `Ctrl+F2` |
 | Sync with Gradle | `Ctrl+Shift+O` |
@@ -163,17 +172,19 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 | `crates/mycelium-project` | The mod project: `.mycelium`, detection, the Gradle model, libraries, code origin |
 | `crates/mycelium-log` | Parsing and classifying game, Gradle and compiler logs |
 | `crates/forma-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
-| `crates/forma-ui` | Theme, fonts, widgets, the settings window, the keymap page, Find Action |
+| `crates/forma-ui` | The theme engine, fonts, widgets, the settings window, the keymap page, Find Action |
+| `crates/mycelium/themes/` | Built-in themes |
 | `crates/forma-actions` | Actions and the keymap |
 | `crates/forma-settings` | Settings components, their files, export and import |
 | `crates/forma-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks |
 | `locales/<lang>/*.ftl` | UI translations (`platform.ftl` holds the platform's strings) |
-| `assets/discord/` | Images for Discord Rich Presence |
+| `assets/logo/` | The logo: a detailed version for large sizes, a simple one for small icons |
+| `assets/discord/` | Images for Discord Rich Presence (sources and licenses in its README) |
 | `xtask` | Build tasks (`cargo xtask dist`, `cargo xtask discord-assets`) |
 
 ### Where data lives
 
-- `%APPDATA%\Forma\Mycelium\` stores workspaces, window placement and the default layout. Settings live in `options\`, one file per category (`appearance.json`, `keymap.json`…). Set `FORMA_CONFIG_HOME` to keep them somewhere else, for example for a portable copy.
+- `%APPDATA%\Forma\Mycelium\` stores workspaces, window placement and the default layout. Settings live in `options\`, one file per category (`appearance.json`, `fonts.json`, `keymap.json`…), and your own themes in `themes\`. Set `FORMA_CONFIG_HOME` to keep them somewhere else, for example for a portable copy.
 - `%LOCALAPPDATA%\Forma\Mycelium\` stores the language server and its per-project indexes. Eclipse metadata lives here, not in your mod.
 - `<mod>\.mycelium\` is the project:
   - `project.json` and `runs.json` are meant for git;
@@ -241,7 +252,14 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 - **Раскладка в духе Blender.** Любая область делится на вкладки. Их можно перетаскивать между областями и выносить в отдельные окна ОС.
 - **Рабочие пространства** («Код», «Карта», «Ассеты», «Отладка»), у каждого своя раскладка. Её можно сохранить для проекта или как стандартную для всех.
 - **Активность в Discord:** «Mod: Your Mod (yourmod)» с живым статусом (пишет код, запущен клиент, разбирается с крашем…), таймером и значком загрузчика. Её можно выключить, а проект — сделать секретным.
-- **Интерфейс на русском и английском,** язык переключается на лету. Другие языки добавляются файлами Fluent.
+- **Интерфейс на русском и английском,** язык переключается на лету. Есть и **English · русские подсказки**: меню и термины на английском, как в руководствах по моддингу, а подсказки и объяснения по-русски. Другие языки добавляются файлами Fluent.
+- **Темы, в которых перекрашивается всё:**
+  - встроенные темы: Mycelium Dark Default, Mycelium Light Default и Visual Studio Dark;
+  - свои темы — файлы `.toml`, где задаётся только то, что меняется. Розовая шапка — буквально одна строка (`"menubar.bg" = "#ff69b4"`). Темы обновляются сразу после сохранения файла;
+  - тема задаёт каждую область (шапку, строку состояния, вкладки, редактор, всплывающие окна, кнопки, консоль, цвета происхождения), подсветку кода с жирным и курсивом, а при желании — свои шрифты и фоновую картинку;
+  - **быстрая смена темы** (``Ctrl+` ``): наведение или стрелки — посмотреть, Enter — оставить, Esc — вернуть прежнюю.
+- **Шрифты:** отдельные для интерфейса, редактора кода и консоли, из установленных в системе, с размером в пикселях и высотой строки. `Ctrl+колёсико` меняет размер шрифта редактора и консоли.
+- **Фоновая картинка** полупрозрачно поверх окна, как в Rider.
 - **Настройки в духе IDE от JetBrains:**
   - окно настроек с деревом страниц и поиском по всем пунктам;
   - изменения применяются кнопками «Применить» или «ОК» и отменяются «Отменой»;
@@ -256,7 +274,8 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 3. 🔧 **Платформа Forma (идёт сейчас):**
    - ✅ настройки по группам как в Rider, экспорт и импорт;
    - ✅ раскладка клавиш и «Найти действие»;
-   - темы, где можно перекрасить всё: подсветку, иконки, шрифты, фоновую картинку;
+   - ✅ темы, где перекрашивается всё, три независимых шрифта, фоновая картинка;
+   - набор SVG-иконок, которые темы могут заменять;
    - плагины: темы, новые окна, скрипты на Python. Тяжёлые инструменты вроде jdtls становятся необязательными плагинами.
 4. **Hyphae, движок знаний.** Он понимает весь мод:
    - к какому моду относится каждый класс, ресурс и строка лога;
@@ -306,6 +325,7 @@ cargo test
 | Действие | Сочетание |
 |---|---|
 | Найти действие | `Ctrl+Shift+A` |
+| Быстрая смена темы | ``Ctrl+` `` |
 | Настройки | `Ctrl+Alt+S` |
 | Запустить / остановить | `Shift+F10` / `Ctrl+F2` |
 | Синхронизировать с Gradle | `Ctrl+Shift+O` |
@@ -327,17 +347,19 @@ cargo test
 | `crates/mycelium-project` | Проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
 | `crates/mycelium-log` | Разбор и классификация логов игры, Gradle и компиляторов |
 | `crates/forma-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
-| `crates/forma-ui` | Тема, шрифты, виджеты, окно настроек, страница раскладки клавиш, «Найти действие» |
+| `crates/forma-ui` | Движок тем, шрифты, виджеты, окно настроек, страница раскладки клавиш, «Найти действие» |
+| `crates/mycelium/themes/` | Встроенные темы |
 | `crates/forma-actions` | Действия и раскладка клавиш |
 | `crates/forma-settings` | Компоненты настроек, их файлы, экспорт и импорт |
 | `crates/forma-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов |
 | `locales/<язык>/*.ftl` | Переводы интерфейса (`platform.ftl` — строки платформы) |
-| `assets/discord/` | Картинки для активности в Discord |
+| `assets/logo/` | Логотип: подробный для больших размеров, упрощённый для маленьких значков |
+| `assets/discord/` | Картинки для активности в Discord (откуда они и лицензии — в README папки) |
 | `xtask` | Служебные задачи сборки (`cargo xtask dist`, `cargo xtask discord-assets`) |
 
 ### Где хранятся данные
 
-- `%APPDATA%\Forma\Mycelium\` — рабочие пространства, положение окна и стандартная раскладка. Настройки лежат в `options\`, по файлу на категорию (`appearance.json`, `keymap.json`…). Переменная `FORMA_CONFIG_HOME` переносит их в другую папку, например для переносной копии.
+- `%APPDATA%\Forma\Mycelium\` — рабочие пространства, положение окна и стандартная раскладка. Настройки лежат в `options\`, по файлу на категорию (`appearance.json`, `fonts.json`, `keymap.json`…), а свои темы — в `themes\`. Переменная `FORMA_CONFIG_HOME` переносит их в другую папку, например для переносной копии.
 - `%LOCALAPPDATA%\Forma\Mycelium\` — языковой сервер и его индексы по проектам. Метаданные Eclipse лежат здесь, а не в папке мода.
 - `<мод>\.mycelium\` — сам проект:
   - `project.json` и `runs.json` предназначены для git;

@@ -317,7 +317,7 @@ fn indent_for_newline(text: &str, ci: usize) -> String {
 
 /// Редактор файла. `rel` — путь для заголовка. `lsp` — подсказки Java (если проект их ведёт).
 #[allow(clippy::too_many_arguments)]
-pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64, font_size: f32, now: f64, lsp: Option<&mut JavaLsp>, keys: super::Keys, cmds: &mut Vec<Cmd>) {
+pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64, fonts: &forma_ui::fonts::Fonts, now: f64, lsp: Option<&mut JavaLsp>, keys: super::Keys, cmds: &mut Vec<Cmd>) {
     header(ui, doc, rel, pal);
     // Подсказки — только для Java-файлов проекта (не для исходников из jar).
     let java = doc.lang == "java" && !doc.readonly();
@@ -347,8 +347,8 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
         ctx.memory_mut(|m| m.request_focus(id));
     }
     let has_focus = ctx.memory(|m| m.has_focus(id));
-    let size = (font_size * 0.86).round();
-    let line_height = (size * 1.45).round();
+    let size = fonts.editor.size;
+    let line_height = fonts.editor.row_height();
 
     // Tab — четыре пробела, Enter — с отступом предыдущей строки.
     let readonly = doc.readonly();
@@ -376,25 +376,40 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
     let lines = doc.text.split('\n').count();
     let digits = lines.to_string().len().max(3) as f32;
     let gutter_w = digits * size * 0.62 + 22.0;
-    let dark = pal.dark;
     let lang = doc.lang;
     let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
-        let mut job = crate::highlight::job(ui.ctx(), buf.as_str(), lang, dark, size, line_height);
+        let mut job = crate::highlight::job(ui.ctx(), buf.as_str(), lang, size, line_height);
         job.wrap.max_width = f32::INFINITY;
         ui.fonts_mut(|f| f.layout_job(job))
     };
 
     let avail = ui.available_size();
+    // Ctrl+колёсико над редактором меняет размер его шрифта.
+    if fonts.ctrl_wheel && ui.rect_contains_pointer(ui.max_rect()) {
+        let zoom = ui.input(|i| i.zoom_delta());
+        if zoom != 1.0 {
+            cmds.push(Cmd::FontZoom { console: false, step: if zoom > 1.0 { 1.0 } else { -1.0 } });
+        }
+    }
+    ui.painter().rect_filled(ui.available_rect_before_wrap(), CornerRadius::ZERO, pal.editor_bg);
     egui::ScrollArea::both().id_salt(("mycelium-code-scroll", tab_id)).auto_shrink(false).show(ui, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let (gutter, _) = ui.allocate_exact_size(vec2(gutter_w, 0.0), Sense::hover());
+            if pal.editor_gutter != pal.editor_bg {
+                let g = egui::Rect::from_x_y_ranges(gutter.x_range(), ui.clip_rect().y_range());
+                ui.painter().rect_filled(g, CornerRadius::ZERO, pal.editor_gutter);
+            }
+            // Выделение и курсор — свои у редактора.
+            ui.visuals_mut().selection.bg_fill = pal.editor_selection;
+            ui.visuals_mut().selection.stroke.color = pal.editor_selection_text;
+            ui.visuals_mut().text_cursor.stroke.color = pal.editor_cursor;
             // Подсветка строки с курсором (по высоте строки с прошлого кадра).
             let top = ui.cursor().top();
             if doc.row_h > 0.0 && has_focus {
                 let y = top + (doc.cursor.0 as f32 - 1.0) * doc.row_h;
                 let r = egui::Rect::from_min_size(egui::pos2(gutter.left(), y), vec2(ui.clip_rect().right() - gutter.left(), doc.row_h));
-                ui.painter().rect_filled(r, CornerRadius::ZERO, pal.bg_hover.gamma_multiply(0.45));
+                ui.painter().rect_filled(r, CornerRadius::ZERO, pal.editor_current_line);
             }
             let mut show = |buffer: &mut dyn egui::TextBuffer, ui: &mut Ui| {
                 TextEdit::multiline(buffer)
@@ -426,14 +441,14 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
             // Номера строк.
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
             let visible = ui.clip_rect();
-            let font = FontId::monospace(size * 0.9);
+            let font = FontId::new(size * 0.9, forma_ui::fonts::editor(false, false));
             for i in 0..rows {
                 let y = output.galley_pos.y + i as f32 * row_h;
                 if y + row_h < visible.top() || y > visible.bottom() {
                     continue;
                 }
                 let current = has_focus && i + 1 == doc.cursor.0;
-                let color = if current { pal.text } else { pal.text_faint };
+                let color = if current { pal.editor_line_number_current } else { pal.editor_line_number };
                 painter.text(egui::pos2(gutter.right() - 10.0, y + row_h / 2.0), Align2::RIGHT_CENTER, (i + 1).to_string(), font.clone(), color);
             }
 
@@ -482,8 +497,9 @@ fn lsp_banner(ui: &mut Ui, pal: &Palette, lsp: &JavaLsp, cmds: &mut Vec<Cmd>) {
     };
     egui::Frame::new().fill(color.gamma_multiply(0.08)).inner_margin(Margin::symmetric(10, 3)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("☕ {text}")).size(12.0).color(color));
+        // Текст переносится по ширине области, кнопка — следом за ним.
+        ui.horizontal_wrapped(|ui| {
+            ui.add(egui::Label::new(RichText::new(format!("☕ {text}")).size(12.0).color(color)).wrap());
             if let Some((label, cmd)) = action {
                 if ui.small_button(label).clicked() {
                     cmds.push(cmd);
@@ -494,26 +510,47 @@ fn lsp_banner(ui: &mut Ui, pal: &Palette, lsp: &JavaLsp, cmds: &mut Vec<Cmd>) {
 }
 
 /// Строка над редактором: путь файла, позиция курсора, язык, отметка о несохранённом.
+/// В узком редакторе сведения справа теряют лишнее (переводы строк, язык, «только чтение»),
+/// а у пути обрезается начало — имя файла видно всегда.
 fn header(ui: &mut Ui, doc: &Document, rel: &str, pal: &Palette) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::ZERO, pal.bg_header.gamma_multiply(0.6));
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.rect_filled(rect, CornerRadius::ZERO, pal.editor_header);
     let font = FontId::proportional(12.0);
-    let path_color = pal.text_muted;
-    painter.with_clip_rect(rect).text(rect.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, rel.replace('\\', " › ").replace('/', " › "), font.clone(), path_color);
-    let mut info = format!("{}:{}", doc.cursor.0, doc.cursor.1);
+    let path = rel.replace('\\', " › ").replace('/', " › ");
+    let pos = format!("{}:{}", doc.cursor.0, doc.cursor.1);
+    let mut parts: Vec<String> = Vec::new();
     if doc.readonly() {
-        info = format!("🔒 {}  ·  {info}", t!("code-readonly"));
+        parts.push(format!("🔒 {}", t!("code-readonly")));
     }
+    parts.push(pos.clone());
     if !doc.lang.is_empty() {
-        info.push_str(&format!("  ·  {}", lang_name(doc.lang)));
+        parts.push(lang_name(doc.lang).to_owned());
     }
     if doc.crlf {
-        info.push_str("  ·  CRLF");
+        parts.push("CRLF".to_owned());
     }
-    let right = painter.text(rect.right_center() - vec2(10.0, 0.0), Align2::RIGHT_CENTER, info, font, pal.text_faint);
+    // Варианты от полного к краткому: пути должно остаться хотя бы 120 точек.
+    let variants = [parts.join("  ·  "), parts.iter().filter(|p| *p != "CRLF").cloned().collect::<Vec<_>>().join("  ·  "), pos.clone()];
+    let room = rect.width() - 20.0 - if doc.dirty { 16.0 } else { 0.0 };
+    let info = variants
+        .iter()
+        .map(|v| painter.layout_no_wrap(v.clone(), font.clone(), pal.text_faint))
+        .find(|g| room - g.size().x >= 120.0)
+        .unwrap_or_else(|| painter.layout_no_wrap(String::new(), font.clone(), pal.text_faint));
+    let info_w = info.size().x;
+    painter.galley(egui::pos2(rect.right() - 10.0 - info_w, rect.center().y - info.size().y / 2.0), info, pal.text_faint);
+    let mut path_right = rect.right() - 10.0 - info_w - 12.0;
     if doc.dirty {
-        painter.circle_filled(egui::pos2(right.left() - 10.0, rect.center().y), 3.5, pal.accent);
+        let x = rect.right() - 10.0 - info_w - if info_w > 0.0 { 10.0 } else { 4.0 };
+        painter.circle_filled(egui::pos2(x, rect.center().y), 3.5, pal.accent);
+        path_right = x - 10.0;
+    }
+    let galley = forma_ui::widgets::elide_start(ui, &path, font, pal.editor_header_text, path_right - rect.left() - 10.0);
+    let elided = galley.size().x + 0.5 < painter.layout_no_wrap(path.clone(), FontId::proportional(12.0), pal.editor_header_text).size().x;
+    painter.galley(egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, pal.editor_header_text);
+    if elided {
+        resp.on_hover_text(path);
     }
 }
 

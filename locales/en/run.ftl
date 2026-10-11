@@ -32,6 +32,7 @@ console-level-info = INFO and above
 console-level-warn = Warnings and errors
 console-level-error = Errors only
 console-search = Search
+console-filters = Filters
 console-show-in-exceptions = Show in the exceptions window
 
 exceptions-by-system = System

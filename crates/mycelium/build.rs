@@ -1,6 +1,7 @@
-//! Сборочный скрипт: рисует иконку приложения (тот же код, что и в `src/icon.rs`),
-//! собирает из неё .ico нескольких размеров и вшивает в .exe вместе со сведениями
-//! о продукте. Поэтому проводник и диспетчер задач показывают «Forma Mycelium».
+//! Сборочный скрипт: делает из рисунков иконки (тот же код, что и в `src/icon.rs`) .ico
+//! нескольких размеров — маленькие из упрощённого рисунка, большие из подробного — и
+//! вшивает его в .exe вместе со сведениями о продукте. Поэтому проводник и диспетчер
+//! задач показывают «Forma Mycelium».
 
 use std::path::PathBuf;
 
@@ -10,6 +11,7 @@ mod icon;
 fn main() {
     println!("cargo:rerun-if-changed=src/icon.rs");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../../assets/logo");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -87,7 +89,10 @@ fn ico_file(sizes: &[u32]) -> Vec<u8> {
 
 /// Одна картинка .ico: BITMAPINFOHEADER, пиксели BGRA снизу вверх и пустая маска.
 fn bmp_entry(size: u32) -> Vec<u8> {
-    let rgba = icon::rgba(size);
+    // Проводник показывает крупные значки (96 px и больше) — для них подробный рисунок,
+    // панель задач и заголовки окон — маленькие, для них упрощённый.
+    let logo = if size >= 96 { icon::Logo::Detailed } else { icon::Logo::Simple };
+    let rgba = icon::rgba(logo, size);
     let mask_row = size.div_ceil(32) * 4;
     let mut out = Vec::new();
     out.extend_from_slice(&40u32.to_le_bytes());

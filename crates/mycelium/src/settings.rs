@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use forma_actions::Keymap;
 use forma_settings::{AppInfo, Component, Store};
 use forma_ui::appearance::Appearance;
-use forma_ui::theme::{Accent, ThemeKind};
+use forma_ui::fonts::Fonts;
+use forma_ui::theme::Accent;
 use serde::{Deserialize, Serialize};
 
 pub const APP: AppInfo = AppInfo { id: "mycelium", dir_name: "Mycelium", title: "Forma Mycelium", version: env!("CARGO_PKG_VERSION") };
@@ -28,6 +29,11 @@ pub fn cache_dir() -> Option<PathBuf> {
 /// Пользовательские переводы: `%APPDATA%\Forma\Mycelium\locales\<язык>\*.ftl`.
 pub fn user_locales_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("locales"))
+}
+
+/// Свои темы: `%APPDATA%\Forma\Mycelium\themes\*.toml`.
+pub fn user_themes_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("themes"))
 }
 
 /// Активность в Discord.
@@ -75,6 +81,7 @@ impl Recent {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Settings {
     pub appearance: Appearance,
+    pub fonts: Fonts,
     pub keymap: Keymap,
     pub discord: Discord,
     pub recent: Recent,
@@ -88,12 +95,21 @@ impl Settings {
             old.save(store);
             return old;
         }
-        Self { appearance: store.load(), keymap: store.load(), discord: store.load(), recent: store.load() }
+        let had_fonts = store.exists::<Fonts>();
+        let mut s = Self { appearance: store.load(), fonts: store.load(), keymap: store.load(), discord: store.load(), recent: store.load() };
+        // Размер текста первых версий (основа шкалы, текст был на 10% мельче) переезжает в «Шрифты».
+        if let Some(old) = s.appearance.legacy_font_size.take()
+            && !had_fonts
+        {
+            s.fonts.ui.size = (old * 0.9 * 2.0).round() / 2.0;
+        }
+        s
     }
 
     /// Записывает изменившиеся компоненты.
     pub fn save(&self, store: &mut Store) {
         store.save(&self.appearance);
+        store.save(&self.fonts);
         store.save(&self.keymap);
         store.save(&self.discord);
         store.save(&self.recent);
@@ -105,7 +121,7 @@ impl Settings {
 #[serde(default)]
 struct Legacy {
     language: Option<String>,
-    theme: ThemeKind,
+    theme: String,
     accent: Accent,
     font_size: f32,
     zoom: f32,
@@ -119,9 +135,9 @@ impl Default for Legacy {
         let a = Appearance::default();
         Self {
             language: a.language,
-            theme: a.theme,
-            accent: a.accent,
-            font_size: a.font_size,
+            theme: "Dark".to_owned(),
+            accent: Accent::Violet,
+            font_size: 16.0,
             zoom: a.zoom,
             recent_projects: Vec::new(),
             last_project: None,
@@ -132,8 +148,15 @@ impl Default for Legacy {
 
 impl Legacy {
     fn into_settings(self) -> Settings {
+        let theme = match self.theme.as_str() {
+            "Light" => "mycelium-light",
+            _ => "mycelium-dark",
+        };
+        let mut fonts = Fonts::default();
+        fonts.ui.size = (self.font_size * 0.9 * 2.0).round() / 2.0;
         Settings {
-            appearance: Appearance { language: self.language, theme: self.theme, accent: self.accent, font_size: self.font_size, zoom: self.zoom },
+            appearance: Appearance { language: self.language, theme: theme.to_owned(), accent: Some(self.accent), zoom: self.zoom, ..Appearance::default() },
+            fonts,
             keymap: Keymap::default(),
             discord: Discord { enabled: self.discord_presence },
             recent: Recent { projects: self.recent_projects, last: self.last_project },
@@ -179,8 +202,9 @@ mod tests {
         let json = r#"{"language":"ru","theme":"Light","accent":"Teal","font_size":15.0,"zoom":1.25,"recent_projects":["D:/mods/a"],"last_project":"D:/mods/a","discord_presence":false}"#;
         let s = serde_json::from_str::<Legacy>(json).unwrap().into_settings();
         assert_eq!(s.appearance.language.as_deref(), Some("ru"));
-        assert_eq!(s.appearance.theme, ThemeKind::Light);
-        assert_eq!(s.appearance.accent, Accent::Teal);
+        assert_eq!(s.appearance.theme, "mycelium-light");
+        assert_eq!(s.appearance.accent, Some(Accent::Teal));
+        assert_eq!(s.fonts.ui.size, 13.5);
         assert_eq!(s.appearance.zoom, 1.25);
         assert!(!s.discord.enabled);
         assert_eq!(s.recent.projects, vec![PathBuf::from("D:/mods/a")]);

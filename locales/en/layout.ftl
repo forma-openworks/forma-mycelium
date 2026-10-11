@@ -2,6 +2,10 @@
 
 dock-add-editor = Add an editor to this area
 dock-area-menu = Area actions
+dock-more-tabs = { $count ->
+    [one] { $count } more tab
+   *[other] { $count } more tabs
+}
 dock-add-editor-button = ＋ Add editor
 dock-empty-title = Nothing here yet
 dock-empty-hint = Add an editor or drag a tab here

@@ -110,34 +110,68 @@ pub fn ui(ui: &mut Ui, pal: &Palette, view: &mut ExceptionsView, console: &Conso
     let errors = all.iter().filter(|p| !p.sample.noise && severity(p) <= 1).count();
     let warnings = all.iter().filter(|p| !p.sample.noise).count() - errors;
 
-    // Панель: группировка, фильтры, счётчики.
+    // Панель: группировка и фильтры слева, счётчики справа. В узкой области счётчики
+    // уходят на вторую строку, группировка становится выпадающим списком, а фильтры
+    // сворачиваются в меню «⋯».
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.add_space(6.0);
-        let labels = [t!("exceptions-by-system"), t!("exceptions-by-type"), t!("exceptions-by-origin"), t!("exceptions-by-severity")];
-        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let modes = [GroupBy::System, GroupBy::Type, GroupBy::Origin, GroupBy::Severity];
-        let current = modes.iter().position(|m| *m == view.group_by).unwrap_or(0);
-        if let Some(i) = forma_ui::widgets::segmented(ui, pal, egui::Id::new("mycelium-exceptions-group"), &refs, current, false) {
-            view.group_by = modes[i];
-        }
-        ui.add_space(6.0);
-        if ui.add(egui::Button::new(t!("console-only-own")).selected(view.only_own)).clicked() {
-            view.only_own = !view.only_own;
-        }
-        if ui.add(egui::Button::new(t!("exceptions-only-errors")).selected(view.only_errors)).clicked() {
-            view.only_errors = !view.only_errors;
-        }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_space(6.0);
+    let mut cleared = false;
+    let bar_id = ui.id().with("mycelium-exceptions-bar");
+    let (only_own, only_errors) = (t!("console-only-own"), t!("exceptions-only-errors"));
+    let toggles_w = forma_ui::widgets::button_width(ui, &only_own, 0.0) + forma_ui::widgets::button_width(ui, &only_errors, 0.0) + 22.0;
+    forma_ui::widgets::bar(
+        ui,
+        bar_id,
+        6.0,
+        |ui| {
+            let labels = [t!("exceptions-by-system"), t!("exceptions-by-type"), t!("exceptions-by-origin"), t!("exceptions-by-severity")];
+            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let modes = [GroupBy::System, GroupBy::Type, GroupBy::Origin, GroupBy::Severity];
+            let current = modes.iter().position(|m| *m == view.group_by).unwrap_or(0);
+            let segmented_w = forma_ui::widgets::segmented_width(ui, &refs);
+            let compact = segmented_w + toggles_w > ui.available_width();
+            if segmented_w <= ui.available_width() {
+                if let Some(i) = forma_ui::widgets::segmented(ui, pal, bar_id.with("group-by"), &refs, current, false) {
+                    view.group_by = modes[i];
+                }
+            } else {
+                let options: Vec<(GroupBy, String)> = modes.into_iter().zip(labels).collect();
+                let width = (ui.available_width() - 40.0).clamp(90.0, 160.0);
+                if let Some(m) = forma_ui::widgets::dropdown(ui, pal, bar_id.with("group"), width, &view.group_by, &options) {
+                    view.group_by = m;
+                }
+            }
+            if compact {
+                let more = ui.add(egui::Button::new("⋯").selected(view.only_own || view.only_errors)).on_hover_text(t!("console-filters"));
+                egui::Popup::menu(&more).style(forma_ui::theme::menu_style).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    if ui.add(egui::Button::new(&only_own).selected(view.only_own)).clicked() {
+                        view.only_own = !view.only_own;
+                    }
+                    if ui.add(egui::Button::new(&only_errors).selected(view.only_errors)).clicked() {
+                        view.only_errors = !view.only_errors;
+                    }
+                });
+            } else {
+                ui.add_space(6.0);
+                if ui.add(egui::Button::new(&only_own).selected(view.only_own)).clicked() {
+                    view.only_own = !view.only_own;
+                }
+                if ui.add(egui::Button::new(&only_errors).selected(view.only_errors)).clicked() {
+                    view.only_errors = !view.only_errors;
+                }
+            }
+        },
+        |ui| {
             if ui.button("🗑").on_hover_text(t!("exceptions-clear")).clicked() {
                 cmds.push(Cmd::ClearProblems);
-                view.selected = None;
+                cleared = true;
             }
             ui.label(RichText::new(format!("⚠ {warnings}")).color(pal.warning));
             ui.label(RichText::new(format!("✖ {errors}")).color(pal.danger));
-        });
-    });
+        },
+    );
+    if cleared {
+        view.selected = None;
+    }
     ui.add_space(3.0);
 
     let (noise, visible): (Vec<&Problem>, Vec<&Problem>) = all
@@ -239,9 +273,13 @@ fn group_header(ui: &mut Ui, pal: &Palette, label: &str, problems: usize, total:
     }
     let painter = ui.painter_at(rect);
     painter.text(rect.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, if collapsed { "▸" } else { "▾" }, FontId::proportional(12.0), pal.text_faint);
-    let name = painter.text(rect.left_center() + vec2(26.0, 0.0), Align2::LEFT_CENTER, label, FontId::new(13.0, forma_ui::fonts::semibold()), pal.heading);
     let counts = if total as usize > problems { format!("{problems} · ×{total}") } else { problems.to_string() };
-    painter.text(egui::pos2(name.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, counts, FontId::proportional(12.0), pal.text_faint);
+    let counts = painter.layout_no_wrap(counts, FontId::proportional(12.0), pal.text_faint);
+    // Название группы обрезается, а счётчик остаётся виден.
+    let name = forma_ui::widgets::elide(ui, label, FontId::new(13.0, forma_ui::fonts::semibold()), pal.heading, rect.width() - 26.0 - 8.0 - counts.size().x - 6.0);
+    let name_w = name.size().x;
+    painter.galley(egui::pos2(rect.left() + 26.0, rect.center().y - name.size().y / 2.0), name, pal.heading);
+    painter.galley(egui::pos2(rect.left() + 26.0 + name_w + 8.0, rect.center().y - counts.size().y / 2.0), counts, pal.text_faint);
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 
@@ -249,9 +287,9 @@ fn problem_row(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, selected: bool
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::click());
     let painter = ui.painter_at(rect);
     if selected {
-        painter.rect_filled(rect.shrink2(vec2(4.0, 1.0)), CornerRadius::same(6), pal.accent_soft);
+        painter.rect_filled(rect.shrink2(vec2(4.0, 1.0)), CornerRadius::same(6), pal.list_selected);
     } else if resp.hovered() {
-        painter.rect_filled(rect.shrink2(vec2(4.0, 1.0)), CornerRadius::same(6), pal.bg_hover.gamma_multiply(0.6));
+        painter.rect_filled(rect.shrink2(vec2(4.0, 1.0)), CornerRadius::same(6), pal.list_hover);
     }
     let e = &p.sample;
     painter.rect_filled(egui::Rect::from_min_size(rect.min + vec2(8.0, 7.0), vec2(3.0, rect.height() - 14.0)), CornerRadius::same(1), origin_color(pal, &e.origin));
@@ -263,22 +301,29 @@ fn problem_row(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, selected: bool
     painter.text(egui::pos2(rect.left() + 26.0, rect.top() + 12.0), Align2::CENTER_CENTER, severity_glyph(p), FontId::proportional(12.5), sev_color);
     let title = entry_title(e);
     let title_color = if e.noise { pal.text_muted } else { pal.heading };
-    let t_rect = painter.text(egui::pos2(rect.left() + 38.0, rect.top() + 12.0), Align2::LEFT_CENTER, &title, FontId::proportional(13.0), title_color);
-    let mut x = t_rect.right() + 8.0;
-    if p.count > 1 {
-        let r = painter.text(egui::pos2(x, rect.top() + 12.0), Align2::LEFT_CENTER, format!("×{}", p.count), FontId::proportional(12.0), pal.text_muted);
-        x = r.right() + 8.0;
+    // Счётчик повторов и отметка «новое» не обрезаются — место под них берётся у названия.
+    let count = (p.count > 1).then(|| painter.layout_no_wrap(format!("×{}", p.count), FontId::proportional(12.0), pal.text_muted));
+    let badge = p.is_new(run).then(|| painter.layout_no_wrap(t!("exceptions-new"), FontId::proportional(10.5), pal.accent));
+    let extras = count.as_ref().map_or(0.0, |g| g.size().x + 8.0) + badge.as_ref().map_or(0.0, |g| g.size().x + 18.0);
+    let right = rect.right() - 8.0;
+    let title = forma_ui::widgets::elide(ui, title, FontId::proportional(13.0), title_color, right - (rect.left() + 38.0) - extras);
+    let mut x = rect.left() + 38.0 + title.size().x + 8.0;
+    painter.galley(egui::pos2(rect.left() + 38.0, rect.top() + 12.0 - title.size().y / 2.0), title, title_color);
+    if let Some(g) = count {
+        let w = g.size().x;
+        painter.galley(egui::pos2(x, rect.top() + 12.0 - g.size().y / 2.0), g, pal.text_muted);
+        x += w + 8.0;
     }
-    if p.is_new(run) {
-        let g = painter.layout_no_wrap(t!("exceptions-new"), FontId::proportional(10.5), pal.accent);
+    if let Some(g) = badge {
         let r = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 5.0), g.size() + vec2(10.0, 4.0));
         painter.rect_filled(r, CornerRadius::same(7), pal.accent_soft);
         painter.galley(r.min + vec2(5.0, 2.0), g, pal.accent);
     }
     // Вторая строка: сообщение и происхождение.
     let sub = if e.known.is_some() || e.throwable.is_none() { e.message.clone() } else { e.throwable.as_ref().and_then(|t| t.root_cause().message.clone()).unwrap_or_else(|| e.message.clone()) };
-    let sub = format!("{} · {}", origin_label(&e.origin), sub);
-    painter.text(egui::pos2(rect.left() + 38.0, rect.top() + 27.0), Align2::LEFT_CENTER, sub, FontId::proportional(11.5), pal.text_faint);
+    let sub = format!("{} · {}", origin_label(&e.origin), sub.lines().next().unwrap_or(""));
+    let sub = forma_ui::widgets::elide(ui, sub, FontId::proportional(11.5), pal.text_faint, right - (rect.left() + 38.0));
+    painter.galley(egui::pos2(rect.left() + 38.0, rect.top() + 27.0 - sub.size().y / 2.0), sub, pal.text_faint);
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 

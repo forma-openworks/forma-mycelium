@@ -2,6 +2,11 @@
 
 dock-add-editor = Добавить редактор в эту область
 dock-area-menu = Действия с областью
+dock-more-tabs = { $count ->
+    [one] Ещё { $count } вкладка
+    [few] Ещё { $count } вкладки
+   *[many] Ещё { $count } вкладок
+}
 dock-add-editor-button = ＋ Добавить редактор
 dock-empty-title = Здесь пока пусто
 dock-empty-hint = Добавьте редактор или перетащите сюда вкладку

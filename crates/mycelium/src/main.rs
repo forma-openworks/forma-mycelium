@@ -3,6 +3,7 @@
 
 mod actions;
 mod app;
+mod colors;
 mod discord;
 mod editors;
 mod highlight;

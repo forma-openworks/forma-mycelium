@@ -10,7 +10,9 @@ use forma_actions::{Context as ActionContext, Keymap};
 use forma_i18n::t;
 use forma_settings::export::{self, Archive, Status};
 use forma_settings::{Component, decode};
-use forma_ui::appearance::{self, Appearance};
+use forma_ui::appearance::{self, Appearance, PageContext, ThemeOption};
+use forma_ui::font_page::{self, FontPage};
+use forma_ui::fonts::Fonts;
 use forma_ui::find_action::{FindAction, Item};
 use forma_ui::keymap_page::{self, KeymapPage};
 use forma_ui::settings_window::{self as sw, Footer, PageInfo, SettingsWindow};
@@ -28,6 +30,7 @@ pub(super) struct SettingsDialog {
     window: SettingsWindow,
     draft: Settings,
     keymap: KeymapPage,
+    fonts: FontPage,
     /// «Секретный проект» — настройка открытого проекта, а не программы.
     discord_secret: bool,
 }
@@ -36,6 +39,7 @@ pub(super) struct SettingsDialog {
 fn exportable() -> Vec<(&'static str, String, String)> {
     vec![
         (Appearance::ID, t!("settings-page-appearance"), t!("settings-component-appearance")),
+        (Fonts::ID, t!("settings-page-fonts"), t!("settings-component-fonts")),
         (Keymap::ID, t!("settings-page-keymap"), t!("settings-component-keymap")),
         (Discord::ID, t!("settings-page-discord"), t!("settings-component-discord")),
     ]
@@ -75,6 +79,7 @@ impl MyceliumApp {
             window: SettingsWindow::new(page),
             draft: self.settings.clone(),
             keymap: KeymapPage::default(),
+            fonts: FontPage::default(),
             discord_secret: self.view.discord_secret,
         })));
     }
@@ -83,6 +88,7 @@ impl MyceliumApp {
         let platform = t!("settings-section-platform");
         vec![
             PageInfo { id: appearance::PAGE.into(), section: platform.clone(), title: t!("settings-page-appearance"), keywords: appearance::keywords() },
+            PageInfo { id: font_page::PAGE.into(), section: platform.clone(), title: t!("settings-page-fonts"), keywords: font_page::keywords() },
             PageInfo { id: keymap_page::PAGE.into(), section: platform, title: t!("settings-page-keymap"), keywords: keymap_page::keywords(&self.actions) },
             PageInfo {
                 id: DISCORD_PAGE.into(),
@@ -97,6 +103,7 @@ impl MyceliumApp {
     fn apply_settings(&mut self, d: &SettingsDialog) {
         let language_changed = d.draft.appearance.effective_language() != self.settings.appearance.effective_language();
         self.settings.appearance = d.draft.appearance.clone();
+        self.settings.fonts = d.draft.fonts.clone();
         self.settings.keymap = d.draft.keymap.clone();
         self.settings.discord = d.draft.discord.clone();
         self.view.discord_secret = d.discord_secret;
@@ -108,7 +115,7 @@ impl MyceliumApp {
     }
 
     fn draft_dirty(&self, d: &SettingsDialog) -> bool {
-        d.draft.appearance != self.settings.appearance || d.draft.keymap != self.settings.keymap || d.draft.discord != self.settings.discord || d.discord_secret != self.view.discord_secret
+        d.draft.appearance != self.settings.appearance || d.draft.fonts != self.settings.fonts || d.draft.keymap != self.settings.keymap || d.draft.discord != self.settings.discord || d.discord_secret != self.view.discord_secret
     }
 
     /// Окно настроек. Возвращает `true`, когда его пора закрыть.
@@ -118,6 +125,7 @@ impl MyceliumApp {
         let secret = self.view.discord_secret;
         let modified = |id: &str| match id {
             appearance::PAGE => d.draft.appearance != live.appearance,
+            font_page::PAGE => d.draft.fonts != live.fonts,
             keymap_page::PAGE => d.draft.keymap != live.keymap,
             DISCORD_PAGE => d.draft.discord != live.discord || d.discord_secret != secret,
             _ => false,
@@ -129,10 +137,23 @@ impl MyceliumApp {
         let max = ui.ctx().content_rect().size() - vec2(48.0, 48.0);
         let locales = settings::user_locales_dir();
         let project_open = self.project.is_some();
-        let SettingsDialog { window, draft, keymap, discord_secret } = d;
+        let themes: Vec<ThemeOption> = self.themes.list().iter().map(|t| ThemeOption { id: t.id.clone(), name: t.name.clone() }).collect();
+        let mut theme_errors = self.theme.errors.clone();
+        theme_errors.extend(self.themes.broken.iter().map(|(path, e)| format!("{}: {e}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())));
+        let cx = PageContext {
+            locales_dir: locales.as_deref(),
+            themes_dir: self.themes.dir(),
+            themes: &themes,
+            default_theme: crate::colors::DEFAULT_THEME,
+            theme_errors: &theme_errors,
+        };
+        // Шрифты темы, выбранной в черновике: от неё зависит, какие поля заблокированы.
+        let draft_theme_fonts = self.themes.resolve(&d.draft.appearance.theme, crate::colors::DEFAULT_THEME, None).fonts;
+        let SettingsDialog { window, draft, keymap, fonts, discord_secret } = d;
         let actions = &self.actions;
         let footer = window.show(ui, pal, max, &pages, &modified, dirty, &mut |ui, page, search| match page {
-            appearance::PAGE => appearance::page(ui, pal, search, &mut draft.appearance, locales.as_deref()),
+            appearance::PAGE => appearance::page(ui, pal, search, &mut draft.appearance, &cx),
+            font_page::PAGE => fonts.ui(ui, pal, search, &mut draft.fonts, &draft_theme_fonts),
             keymap_page::PAGE => keymap.ui(ui, pal, actions, &mut draft.keymap, search),
             DISCORD_PAGE => discord_page(ui, pal, search, &mut draft.discord, discord_secret, project_open),
             _ => {}
@@ -174,7 +195,7 @@ impl MyceliumApp {
     }
 
     pub(super) fn find_action_ui(&mut self, ui: &mut Ui, pal: &Palette, f: &mut FindAction) -> bool {
-        ui.set_width(560.0);
+        ui.set_width(super::chrome::modal_width(ui.ctx(), 560.0));
         let items = self.find_items();
         let Some(id) = f.ui(ui, pal, &items) else { return false };
         match id.strip_prefix(SETTINGS_ITEM) {
@@ -185,7 +206,7 @@ impl MyceliumApp {
     }
 
     pub(super) fn export_ui(&mut self, ui: &mut Ui, pal: &Palette, e: &mut ExportDialog, now: f64) -> bool {
-        ui.set_width(460.0);
+        ui.set_width(super::chrome::modal_width(ui.ctx(), 460.0));
         title(ui, pal, &t!("settings-export-title"));
         ui.add(egui::Label::new(RichText::new(t!("settings-export-hint")).size(12.5).color(pal.text_muted)).wrap());
         ui.add_space(10.0);
@@ -220,6 +241,9 @@ impl MyceliumApp {
         if on(Appearance::ID) {
             archive.add(&self.settings.appearance);
         }
+        if on(Fonts::ID) {
+            archive.add(&self.settings.fonts);
+        }
         if on(Keymap::ID) {
             archive.add(&self.settings.keymap);
         }
@@ -252,6 +276,7 @@ impl MyceliumApp {
         let partial = |skipped: Vec<String>| if skipped.is_empty() { Status::Apply } else { Status::Partial(skipped) };
         match id {
             Appearance::ID => decode::<Appearance>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
+            Fonts::ID => decode::<Fonts>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
             Discord::ID => decode::<Discord>(value).map_or_else(Status::Invalid, |(_, s)| partial(s)),
             Keymap::ID => match decode::<Keymap>(value) {
                 Ok((mut k, mut skipped)) => {
@@ -281,6 +306,11 @@ impl MyceliumApp {
                     self.settings.discord = d;
                 }
             }
+            Fonts::ID => {
+                if let Ok((f, _)) = decode::<Fonts>(value) {
+                    self.settings.fonts = f;
+                }
+            }
             Keymap::ID => {
                 if let Ok((mut k, _)) = decode::<Keymap>(value) {
                     k.retain_known(&self.actions);
@@ -292,7 +322,7 @@ impl MyceliumApp {
     }
 
     pub(super) fn import_ui(&mut self, ui: &mut Ui, pal: &Palette, d: &mut ImportDialog) -> bool {
-        ui.set_width(500.0);
+        ui.set_width(super::chrome::modal_width(ui.ctx(), 500.0));
         if let Some(report) = &d.report {
             title(ui, pal, &t!("settings-import-done-title"));
             for (id, status) in report {

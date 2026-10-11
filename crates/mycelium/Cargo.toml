@@ -16,6 +16,8 @@ forma-layout.workspace = true
 forma-ui.workspace = true
 forma-actions.workspace = true
 forma-settings.workspace = true
+# Фоновая картинка окна.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
 mycelium-project.workspace = true
 mycelium-log.workspace = true
 eframe.workspace = true
@@ -32,3 +34,5 @@ syntect = { version = "5.3", default-features = false, features = ["default-fanc
 
 [build-dependencies]
 embed-resource = "3.0.12"
+# Иконка .exe собирается из рисунков в assets/logo.
+image = { version = "0.25", default-features = false, features = ["webp"] }

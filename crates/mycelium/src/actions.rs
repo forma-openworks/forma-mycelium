@@ -21,6 +21,7 @@ pub const EDIT_RUN_CONFIGS: &str = "run.editConfigurations";
 pub const ZOOM_IN: &str = "view.zoomIn";
 pub const ZOOM_OUT: &str = "view.zoomOut";
 pub const ZOOM_RESET: &str = "view.zoomReset";
+pub const QUICK_THEME: &str = "view.quickSwitchTheme";
 
 pub const SHOW_PROJECT: &str = "window.project";
 pub const SHOW_CONSOLE: &str = "window.console";
@@ -58,6 +59,7 @@ pub fn registry() -> Registry {
     add(ZOOM_IN, "action-group-view", "action-zoom-in", Global, &["Ctrl+=", "Ctrl++"]);
     add(ZOOM_OUT, "action-group-view", "action-zoom-out", Global, &["Ctrl+-"]);
     add(ZOOM_RESET, "action-group-view", "action-zoom-reset", Global, &["Ctrl+0"]);
+    add(QUICK_THEME, "action-group-view", "action-quick-theme", Global, &["Ctrl+`"]);
 
     add(SHOW_PROJECT, "action-group-window", "action-show-project", Global, &["Alt+1"]);
     add(SHOW_CONSOLE, "action-group-window", "action-show-console", Global, &["Alt+4"]);
