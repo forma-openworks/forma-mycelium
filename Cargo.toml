@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/mycelium", "crates/mycelium-layout", "crates/mycelium-i18n", "xtask"]
+members = ["crates/mycelium", "crates/mycelium-layout", "crates/mycelium-i18n", "crates/mycelium-project", "crates/mycelium-log", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,8 @@ license = "MIT"
 [workspace.dependencies]
 mycelium-i18n = { path = "crates/mycelium-i18n" }
 mycelium-layout = { path = "crates/mycelium-layout" }
+mycelium-project = { path = "crates/mycelium-project" }
+mycelium-log = { path = "crates/mycelium-log" }
 
 eframe = { version = "0.36", default-features = false, features = [
     "wgpu_no_default_features",

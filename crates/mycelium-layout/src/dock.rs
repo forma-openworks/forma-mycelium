@@ -223,6 +223,11 @@ impl<T> DockState<T> {
         self.rt.focused.get(&key).copied()
     }
 
+    /// Делает область текущей (например, когда в ней открыли файл).
+    pub fn focus(&mut self, key: SurfaceKey, area: AreaId) {
+        self.rt.focused.insert(key, area);
+    }
+
     pub fn is_dragging(&self) -> bool {
         self.rt.drag.is_some()
     }

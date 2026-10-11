@@ -1,6 +1,8 @@
 //! Рабочие пространства — вкладки над интерфейсом («Код», «Карта», «Ассеты», «Отладка»),
 //! как Layout / Modeling / Shading в Blender. У каждого своя раскладка областей.
 
+use std::path::Path;
+
 use mycelium_i18n::t;
 use mycelium_layout::{AreaId, DockState, Node, SplitDir, Surface};
 use serde::{Deserialize, Serialize};
@@ -103,17 +105,126 @@ pub fn default_workspaces(ids: &mut Ids) -> Vec<Workspace> {
     Builtin::ALL.iter().map(|&b| Workspace { builtin: Some(b), name: None, surface: builtin_surface(b, ids) }).collect()
 }
 
-/// Файл раскладки: пространства, отдельные окна, счётчики номеров.
+/// Раскладка интерфейса: рабочие пространства, отдельные окна и счётчики номеров.
 #[derive(Serialize, Deserialize)]
-pub struct LayoutFile {
-    pub version: u32,
+pub struct Layout {
     pub workspaces: Vec<Workspace>,
     pub active: usize,
     pub dock: DockState<EditorTab>,
     pub next_tab_id: u64,
 }
 
-pub const LAYOUT_VERSION: u32 = 1;
+impl Layout {
+    /// Заводская раскладка: четыре встроенных пространства.
+    pub fn factory() -> Self {
+        let mut dock = DockState::default();
+        let mut next_tab = 0;
+        let workspaces = default_workspaces(&mut Ids { dock: &mut dock, next_tab: &mut next_tab });
+        Self { workspaces, active: 0, dock, next_tab_id: next_tab }
+    }
+
+    pub fn ids(&mut self) -> Ids<'_> {
+        Ids { dock: &mut self.dock, next_tab: &mut self.next_tab_id }
+    }
+
+    pub fn surfaces(&self) -> impl Iterator<Item = &Surface<EditorTab>> {
+        self.workspaces.iter().map(|w| &w.surface).chain(self.dock.windows.iter().map(|w| &w.surface))
+    }
+
+    /// Чинит загруженную раскладку и выставляет счётчики выше уже занятых номеров.
+    pub fn sanitize(&mut self) {
+        if self.workspaces.is_empty() {
+            self.workspaces = default_workspaces(&mut self.ids());
+        }
+        for w in &mut self.workspaces {
+            w.surface.sanitize();
+        }
+        self.dock.sanitize();
+        let max_area = self.workspaces.iter().map(|w| w.surface.max_area_id()).max().unwrap_or(0);
+        self.dock.reserve_ids(max_area);
+        let max_tab = self.surfaces().flat_map(|s| s.areas().into_iter().flat_map(|a| a.tabs.iter().map(|t| t.id))).max().unwrap_or(0);
+        self.next_tab_id = self.next_tab_id.max(max_tab);
+        self.active = self.active.min(self.workspaces.len() - 1);
+    }
+
+    /// Копия без открытых файлов — для стандартной раскладки, которая подходит любому проекту.
+    /// Вкладки файлов превращаются в пустые вкладки «Код», по одной на область.
+    pub fn without_files(&self) -> Option<Layout> {
+        let value = serde_json::to_value(self).ok()?;
+        let mut copy: Layout = serde_json::from_value(value).ok()?;
+        let strip = |s: &mut Surface<EditorTab>| {
+            s.for_each_area_mut(|a| {
+                let mut seen_code = false;
+                a.tabs.retain_mut(|t| {
+                    if t.kind != EditorKind::Code {
+                        return true;
+                    }
+                    t.file = None;
+                    t.entry = None;
+                    !std::mem::replace(&mut seen_code, true)
+                });
+                a.clamp_active();
+            });
+        };
+        for w in &mut copy.workspaces {
+            strip(&mut w.surface);
+        }
+        for w in &mut copy.dock.windows {
+            strip(&mut w.surface);
+        }
+        copy.sanitize();
+        Some(copy)
+    }
+}
+
+/// Что ещё проект помнит об интерфейсе, кроме раскладки.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewState {
+    /// Раскрытые папки дерева проекта (пути относительно корня, через «/»).
+    pub expanded: Vec<String>,
+    /// Показывать скрытые файлы и папки.
+    pub show_hidden: bool,
+    /// Выбранная конфигурация запуска.
+    pub run_config: Option<String>,
+    /// Раздел «Внешние библиотеки» в дереве раскрыт.
+    pub libs_open: bool,
+}
+
+/// Файл раскладки: `workspace.json` проекта, стандартная и глобальная раскладки.
+#[derive(Deserialize)]
+struct LayoutFile {
+    version: u32,
+    #[serde(flatten)]
+    layout: Layout,
+    #[serde(default)]
+    view: ViewState,
+}
+
+#[derive(Serialize)]
+struct LayoutFileRef<'a> {
+    version: u32,
+    #[serde(flatten)]
+    layout: &'a Layout,
+    view: &'a ViewState,
+}
+
+pub const LAYOUT_VERSION: u32 = 2;
+
+/// Читает раскладку. Файл другой версии или испорченный — `None` (тогда берётся запасная).
+pub fn read_layout(path: &Path) -> Option<(Layout, ViewState)> {
+    let file: LayoutFile = crate::settings::read_json(path)?;
+    if file.version != LAYOUT_VERSION {
+        return None;
+    }
+    let mut layout = file.layout;
+    layout.sanitize();
+    Some((layout, file.view))
+}
+
+pub fn write_layout(path: &Path, layout: &Layout, view: &ViewState) {
+    crate::settings::write_json(path, &LayoutFileRef { version: LAYOUT_VERSION, layout, view });
+}
 
 #[cfg(test)]
 mod tests {
@@ -135,5 +246,37 @@ mod tests {
         assert_eq!(areas.len(), na, "номера областей не повторяются");
         assert_eq!(tabs.len(), nt, "номера вкладок не повторяются");
         assert!(spaces.iter().all(|w| !w.surface.is_empty()));
+    }
+
+    #[test]
+    fn default_layout_drops_open_files() {
+        let mut layout = Layout::factory();
+        let code_area = layout.workspaces[0].surface.areas()[1].id;
+        let next = &mut layout.next_tab_id;
+        let mut a = EditorTab::new(EditorKind::Code, next);
+        a.file = Some("src/A.java".into());
+        let mut b = EditorTab::new(EditorKind::Code, next);
+        b.file = Some("src/B.java".into());
+        let area = layout.workspaces[0].surface.area_mut(code_area).unwrap();
+        area.tabs.push(a);
+        area.tabs.push(b);
+        let copy = layout.without_files().unwrap();
+        let area = copy.workspaces[0].surface.area(code_area).unwrap();
+        assert_eq!(area.tabs.len(), 1, "три вкладки «Код» схлопнулись в одну пустую");
+        assert!(area.tabs[0].file.is_none());
+    }
+
+    #[test]
+    fn layout_file_roundtrip_with_view() {
+        let dir = std::env::temp_dir().join(format!("mycelium-layout-{}", std::process::id()));
+        let path = dir.join("workspace.json");
+        let layout = Layout::factory();
+        let view = ViewState { expanded: vec!["src/main".into()], show_hidden: true, run_config: Some("client".into()), libs_open: true };
+        write_layout(&path, &layout, &view);
+        let (back, view_back) = read_layout(&path).unwrap();
+        assert_eq!(back.workspaces.len(), 4);
+        assert!(view_back.show_hidden);
+        assert_eq!(view_back.expanded, vec!["src/main".to_owned()]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

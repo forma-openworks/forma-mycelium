@@ -1,339 +1,20 @@
-//! Главное окно Forma Mycelium: меню, рабочие пространства, области, строка состояния,
-//! экран приветствия и диалоги.
+//! Оформление главного окна: верхняя строка с меню, рабочими пространствами и запуском,
+//! строка состояния, экран приветствия, диалоги и уведомления.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use eframe::egui::{
-    self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Id, Key, KeyboardShortcut, Layout, Margin, Modifiers, RichText,
-    Sense, Stroke, TextEdit, Ui, vec2,
-};
+use eframe::egui::{self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Id, Key, Layout, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
 use mycelium_i18n::t;
-use mycelium_layout::{DockState, DockStyle};
-use serde::Serialize;
 
-use crate::editors::{EditorKind, EditorTab, Editors, ProjectTree};
-use crate::project::Project;
-use crate::settings::{self, Settings};
+use super::{APP_TITLE, Cmd, Modal, MyceliumApp};
+use crate::editors::EditorKind;
+use crate::settings;
 use crate::theme::{self, Accent, Palette, ThemeKind};
 use crate::widgets;
-use crate::workspace::{self, Builtin, Ids, LAYOUT_VERSION, LayoutFile, Workspace};
-
-pub const APP_TITLE: &str = "Forma Mycelium";
-
-const SETTINGS_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::ALT), Key::S);
-
-/// Действия, которые копятся за кадр и выполняются в его конце.
-pub enum Cmd {
-    OpenProjectDialog,
-    OpenProject(PathBuf),
-    CloseProject,
-    ContinueWithoutProject,
-    OpenEditor(EditorKind),
-    SwitchWorkspace(usize),
-    NewWorkspace(Option<Builtin>),
-    DuplicateWorkspace(usize),
-    RenameWorkspace(usize),
-    ResetWorkspace(usize),
-    DeleteWorkspace(usize),
-    ResetAllWorkspaces,
-    DetachFocused,
-    ReturnAllWindows,
-    ToggleMaximize,
-    Settings,
-    About,
-    Quit,
-}
-
-enum Modal {
-    Settings,
-    About,
-    Rename { index: usize, name: String },
-}
-
-struct Toast {
-    text: String,
-    error: bool,
-    until: f64,
-}
-
-/// Раскладка для записи в файл (поля совпадают с [`LayoutFile`]).
-#[derive(Serialize)]
-struct LayoutRef<'a> {
-    version: u32,
-    workspaces: &'a [Workspace],
-    active: usize,
-    dock: &'a DockState<EditorTab>,
-    next_tab_id: u64,
-}
-
-pub struct MyceliumApp {
-    settings: Settings,
-    pal: Palette,
-    style_key: Option<(ThemeKind, Accent, u32)>,
-    icon: Arc<egui::IconData>,
-    dock_style: DockStyle,
-    workspaces: Vec<Workspace>,
-    active_ws: usize,
-    dock: DockState<EditorTab>,
-    next_tab_id: u64,
-    project: Option<Project>,
-    tree: ProjectTree,
-    /// Экран приветствия вместо рабочего интерфейса.
-    welcome: bool,
-    modal: Option<Modal>,
-    modal_focus: bool,
-    toast: Option<Toast>,
-    cmds: Vec<Cmd>,
-    gpu_info: String,
-    window_title: String,
-    logo: Option<(u32, egui::TextureHandle)>,
-    mark: Option<(u32, egui::TextureHandle)>,
-}
-
-impl MyceliumApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, project_arg: Option<PathBuf>) -> Self {
-        let ctx = &cc.egui_ctx;
-        crate::fonts::install(ctx);
-        ctx.set_zoom_factor(settings.zoom.clamp(0.5, 3.0));
-        let pal = Palette::new(settings.theme, settings.accent);
-        let icon = Arc::new(theme::app_icon());
-        let dock_style = pal.dock_style(APP_TITLE, icon.clone());
-        let gpu_info = cc
-            .wgpu_render_state
-            .as_ref()
-            .map(|rs| {
-                let info = rs.adapter.get_info();
-                format!("{:?} · {}", info.backend, info.name)
-            })
-            .unwrap_or_else(|| "Vulkan".into());
-
-        let (workspaces, active_ws, dock, next_tab_id) = load_layout();
-        let mut app = Self {
-            settings,
-            pal,
-            style_key: None,
-            icon,
-            dock_style,
-            workspaces,
-            active_ws,
-            dock,
-            next_tab_id,
-            project: None,
-            tree: ProjectTree::default(),
-            welcome: true,
-            modal: None,
-            modal_focus: false,
-            toast: None,
-            cmds: Vec::new(),
-            gpu_info,
-            window_title: String::new(),
-            logo: None,
-            mark: None,
-        };
-        // Как в IDEA: при запуске снова открывается последний проект.
-        let path = project_arg.or_else(|| app.settings.last_project.clone().filter(|p| p.is_dir()));
-        if let Some(path) = path {
-            app.open_project(path, 0.0);
-        }
-        app
-    }
-
-    fn now(ctx: &egui::Context) -> f64 {
-        ctx.input(|i| i.time)
-    }
-
-    fn toast(&mut self, text: impl Into<String>, error: bool, now: f64) {
-        self.toast = Some(Toast { text: text.into(), error, until: now + if error { 5.0 } else { 2.6 } });
-    }
-
-    fn open_project(&mut self, path: PathBuf, now: f64) {
-        match Project::open(path.clone()) {
-            Ok(project) => {
-                self.settings.remember_project(&path);
-                self.project = Some(project);
-                self.tree = ProjectTree::default();
-                self.welcome = false;
-            }
-            Err(shown) => {
-                self.settings.recent_projects.retain(|p| p != &path);
-                if self.settings.last_project.as_ref() == Some(&path) {
-                    self.settings.last_project = None;
-                }
-                self.toast(t!("toast-project-missing", path = shown), true, now);
-            }
-        }
-    }
-
-    fn persist(&mut self) {
-        self.settings.save();
-        if let Some(dir) = settings::config_dir() {
-            let layout = LayoutRef {
-                version: LAYOUT_VERSION,
-                workspaces: &self.workspaces,
-                active: self.active_ws,
-                dock: &self.dock,
-                next_tab_id: self.next_tab_id,
-            };
-            settings::write_json(&dir.join("layout.json"), &layout);
-        }
-    }
-
-    fn ids(&mut self) -> Ids<'_> {
-        Ids { dock: &mut self.dock, next_tab: &mut self.next_tab_id }
-    }
-
-    fn process_cmds(&mut self, ctx: &egui::Context) {
-        let now = Self::now(ctx);
-        for cmd in std::mem::take(&mut self.cmds) {
-            match cmd {
-                Cmd::OpenProjectDialog => {
-                    let mut dialog = rfd::FileDialog::new().set_title(t!("dialog-open-project"));
-                    if let Some(dir) = self.settings.recent_projects.first().and_then(|p| p.parent()) {
-                        dialog = dialog.set_directory(dir);
-                    }
-                    if let Some(dir) = dialog.pick_folder() {
-                        self.open_project(dir, now);
-                    }
-                }
-                Cmd::OpenProject(path) => self.open_project(path, now),
-                Cmd::CloseProject => {
-                    self.project = None;
-                    self.settings.last_project = None;
-                    self.welcome = true;
-                }
-                Cmd::ContinueWithoutProject => self.welcome = false,
-                Cmd::OpenEditor(kind) => {
-                    let tab = EditorTab::new(kind, &mut self.next_tab_id);
-                    self.dock.open_tab(tab);
-                }
-                Cmd::SwitchWorkspace(i) => {
-                    if i < self.workspaces.len() {
-                        self.active_ws = i;
-                    }
-                }
-                Cmd::NewWorkspace(template) => {
-                    let ws = match template {
-                        Some(b) => Workspace { builtin: Some(b), name: None, surface: workspace::builtin_surface(b, &mut self.ids()) },
-                        None => self.copy_workspace(self.active_ws),
-                    };
-                    self.workspaces.push(ws);
-                    self.active_ws = self.workspaces.len() - 1;
-                }
-                Cmd::DuplicateWorkspace(i) => {
-                    if i < self.workspaces.len() {
-                        let ws = self.copy_workspace(i);
-                        self.workspaces.insert(i + 1, ws);
-                        self.active_ws = i + 1;
-                    }
-                }
-                Cmd::RenameWorkspace(i) => {
-                    if let Some(ws) = self.workspaces.get(i) {
-                        self.modal = Some(Modal::Rename { index: i, name: ws.title() });
-                        self.modal_focus = true;
-                    }
-                }
-                Cmd::ResetWorkspace(i) => {
-                    if let Some(b) = self.workspaces.get(i).and_then(|w| w.builtin) {
-                        let surface = workspace::builtin_surface(b, &mut self.ids());
-                        self.workspaces[i].surface = surface;
-                    }
-                }
-                Cmd::DeleteWorkspace(i) => {
-                    if self.workspaces.len() > 1 && i < self.workspaces.len() {
-                        self.workspaces.remove(i);
-                        if self.active_ws > i || self.active_ws >= self.workspaces.len() {
-                            self.active_ws = self.active_ws.saturating_sub(1);
-                        }
-                    }
-                }
-                Cmd::ResetAllWorkspaces => {
-                    self.workspaces = workspace::default_workspaces(&mut self.ids());
-                    self.active_ws = 0;
-                }
-                Cmd::DetachFocused => self.dock.detach_focused(&self.workspaces[self.active_ws].surface),
-                Cmd::ReturnAllWindows => self.dock.return_all(),
-                Cmd::ToggleMaximize => self.dock.toggle_maximize_focused(&self.workspaces[self.active_ws].surface),
-                Cmd::Settings => self.modal = Some(Modal::Settings),
-                Cmd::About => self.modal = Some(Modal::About),
-                Cmd::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            }
-        }
-    }
-
-    /// Копия пространства с новыми номерами областей и вкладок.
-    fn copy_workspace(&mut self, i: usize) -> Workspace {
-        let mut ws = self.workspaces[i].clone();
-        ws.name = Some(t!("workspace-copy-name", name = ws.title()));
-        let dock = &mut self.dock;
-        ws.surface.reassign_ids(|| dock.new_area_id());
-        let next = &mut self.next_tab_id;
-        ws.surface.for_each_area_mut(|a| {
-            for tab in &mut a.tabs {
-                *next += 1;
-                tab.id = *next;
-            }
-        });
-        ws
-    }
-
-    fn handle_keys(&mut self, ctx: &egui::Context) {
-        if ctx.input_mut(|i| i.consume_shortcut(&SETTINGS_SHORTCUT)) {
-            self.modal = Some(Modal::Settings);
-        }
-    }
-
-    fn apply_style(&mut self, ctx: &egui::Context) {
-        let key = (self.settings.theme, self.settings.accent, self.settings.font_size.to_bits());
-        if self.style_key != Some(key) {
-            self.pal = Palette::new(self.settings.theme, self.settings.accent);
-            self.dock_style = self.pal.dock_style(APP_TITLE, self.icon.clone());
-            theme::apply(ctx, &self.pal, self.settings.font_size);
-            self.style_key = Some(key);
-        }
-    }
-
-    fn update_title(&mut self, ctx: &egui::Context) {
-        let title = match &self.project {
-            Some(p) => format!("{} — {APP_TITLE}", p.name),
-            None => APP_TITLE.to_owned(),
-        };
-        if title != self.window_title {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-            self.window_title = title;
-        }
-    }
-}
-
-/// Раскладка из файла или исходная, если файла нет или он испорчен.
-fn load_layout() -> (Vec<Workspace>, usize, DockState<EditorTab>, u64) {
-    let file = settings::config_dir()
-        .and_then(|d| settings::read_json::<LayoutFile>(&d.join("layout.json")))
-        .filter(|f| f.version == LAYOUT_VERSION && !f.workspaces.is_empty());
-    match file {
-        Some(mut f) => {
-            for w in &mut f.workspaces {
-                w.surface.sanitize();
-            }
-            f.dock.sanitize();
-            let max_area = f.workspaces.iter().map(|w| w.surface.max_area_id()).max().unwrap_or(0);
-            f.dock.reserve_ids(max_area);
-            let surfaces = f.workspaces.iter().map(|w| &w.surface).chain(f.dock.windows.iter().map(|w| &w.surface));
-            let max_tab = surfaces.flat_map(|s| s.areas().into_iter().flat_map(|a| a.tabs.iter().map(|t| t.id))).max().unwrap_or(0);
-            let active = f.active.min(f.workspaces.len() - 1);
-            (f.workspaces, active, f.dock, f.next_tab_id.max(max_tab))
-        }
-        None => {
-            let mut dock = DockState::default();
-            let mut next_tab = 0;
-            let spaces = workspace::default_workspaces(&mut Ids { dock: &mut dock, next_tab: &mut next_tab });
-            (spaces, 0, dock, next_tab)
-        }
-    }
-}
+use crate::workspace::Builtin;
 
 /// Иконка нужного размера в пикселях экрана — так она остаётся чёткой.
-fn icon_texture(ctx: &egui::Context, cache: &mut Option<(u32, egui::TextureHandle)>, points: f32, name: &str) -> egui::TextureHandle {
+pub(super) fn icon_texture(ctx: &egui::Context, cache: &mut Option<(u32, egui::TextureHandle)>, points: f32, name: &str) -> egui::TextureHandle {
     let px = (points * ctx.pixels_per_point()).round().max(16.0) as u32;
     if let Some((size, tex)) = cache {
         if *size == px {
@@ -346,72 +27,8 @@ fn icon_texture(ctx: &egui::Context, cache: &mut Option<(u32, egui::TextureHandl
     tex
 }
 
-// ============================================================================================
-// Цикл отрисовки
-// ============================================================================================
-
-impl eframe::App for MyceliumApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        self.apply_style(&ctx);
-        self.handle_keys(&ctx);
-        self.settings.zoom = ctx.zoom_factor();
-        if self.active_ws >= self.workspaces.len() {
-            self.active_ws = 0;
-        }
-
-        if self.welcome {
-            self.welcome_ui(ui);
-        } else {
-            self.top_bar(ui);
-            self.status_bar(ui);
-            self.dock_ui(ui, &ctx);
-        }
-        self.modals(&ctx);
-        self.toast_ui(&ctx);
-        self.process_cmds(&ctx);
-        self.update_title(&ctx);
-    }
-
-    /// eframe вызывает это раз в полминуты и при выходе.
-    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        self.persist();
-    }
-
-    fn on_exit(&mut self) {
-        self.persist();
-    }
-
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.pal.bg_deep.to_normalized_gamma_f32()
-    }
-}
-
-// ============================================================================================
-// Части окна
-// ============================================================================================
-
 impl MyceliumApp {
-    fn dock_ui(&mut self, ui: &mut Ui, ctx: &egui::Context) {
-        let ws = &mut self.workspaces[self.active_ws];
-        let mut viewer = Editors {
-            pal: &self.pal,
-            project: self.project.as_ref(),
-            tree: &mut self.tree,
-            recent: &self.settings.recent_projects,
-            next_tab_id: &mut self.next_tab_id,
-            cmds: &mut self.cmds,
-        };
-        let dock = &mut self.dock;
-        let style = &self.dock_style;
-        egui::CentralPanel::default().frame(Frame::new().fill(self.pal.bg_deep)).show(ui, |ui| {
-            dock.show_main(ui, &mut ws.surface, &mut viewer, style);
-        });
-        dock.show_windows(ctx, &mut viewer, style);
-        dock.finish(ctx, &mut ws.surface, &mut viewer);
-    }
-
-    fn top_bar(&mut self, ui: &mut Ui) {
+    pub(super) fn top_bar(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
         let mark = icon_texture(ui.ctx(), &mut self.mark, 20.0, "mycelium-mark");
         egui::Panel::top("mycelium-top").frame(Frame::new().fill(pal.bg_panel).inner_margin(Margin::symmetric(8, 4))).show(ui, |ui| {
@@ -421,6 +38,14 @@ impl MyceliumApp {
                 self.menus(ui, &pal);
                 ui.add_space(18.0);
                 self.workspace_tabs(ui, &pal);
+                if self.project.is_some() {
+                    let now = ui.input(|i| i.time);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.horizontal(|ui| {
+                            crate::editors::console::run_bar(ui, &pal, &self.console, &self.configs, &mut self.view.run_config, now, false, &mut self.cmds);
+                        });
+                    });
+                }
             });
         });
     }
@@ -445,6 +70,10 @@ impl MyceliumApp {
             });
             if ui.add_enabled(self.project.is_some(), item(t!("action-close-project"), "")).clicked() {
                 self.cmds.push(Cmd::CloseProject);
+            }
+            ui.separator();
+            if ui.add_enabled(self.project.is_some(), item(t!("action-save-all"), "Ctrl+S")).clicked() {
+                self.cmds.push(Cmd::SaveAll);
             }
             ui.separator();
             if ui.add(item(t!("action-settings"), "Ctrl+Alt+S")).clicked() {
@@ -484,6 +113,26 @@ impl MyceliumApp {
                 ui.label(RichText::new(t!("view-zoom-hint")).size(12.0).color(pal.text_faint));
             });
         });
+        widgets::top_menu(ui, &t!("menu-run"), false, |ui| {
+            if self.configs.is_empty() {
+                ui.label(RichText::new(t!("run-no-configs")).color(pal.text_faint));
+            }
+            let running = self.console.is_running();
+            for c in self.configs.clone() {
+                let text = format!("{}  {}", c.kind.icon(), c.label());
+                if ui.add_enabled(!running, egui::Button::new(text)).on_hover_text(format!("gradlew {}", c.task)).clicked() {
+                    self.view.run_config = Some(c.id.clone());
+                    self.cmds.push(Cmd::Run);
+                }
+            }
+            ui.separator();
+            if ui.add_enabled(running, item(t!("run-stop"), "Ctrl+F2")).clicked() {
+                self.cmds.push(Cmd::Stop);
+            }
+            if ui.add_enabled(running, item(t!("run-restart"), "")).clicked() {
+                self.cmds.push(Cmd::Rerun);
+            }
+        });
         widgets::top_menu(ui, &t!("menu-window"), false, |ui| {
             ui.menu_button(t!("menu-open-editor"), |ui| {
                 for kind in EditorKind::ALL {
@@ -499,17 +148,27 @@ impl MyceliumApp {
             if ui.add(item(t!("dock-detach"), "")).clicked() {
                 self.cmds.push(Cmd::DetachFocused);
             }
-            if ui.add_enabled(!self.dock.windows.is_empty(), item(t!("action-return-windows"), "")).clicked() {
+            if ui.add_enabled(!self.layout.dock.windows.is_empty(), item(t!("action-return-windows"), "")).clicked() {
                 self.cmds.push(Cmd::ReturnAllWindows);
             }
             ui.separator();
             ui.menu_button(t!("menu-new-workspace"), |ui| self.new_workspace_items(ui));
-            let builtin = self.workspaces[self.active_ws].builtin.is_some();
+            let builtin = self.layout.workspaces[self.layout.active].builtin.is_some();
             if ui.add_enabled(builtin, item(t!("action-reset-workspace"), "")).clicked() {
-                self.cmds.push(Cmd::ResetWorkspace(self.active_ws));
+                self.cmds.push(Cmd::ResetWorkspace(self.layout.active));
             }
             if ui.add(item(t!("action-reset-all-workspaces"), "")).clicked() {
                 self.cmds.push(Cmd::ResetAllWorkspaces);
+            }
+            ui.separator();
+            if ui.add(item(t!("layout-save-default"), "")).on_hover_text(t!("layout-save-default-hint")).clicked() {
+                self.cmds.push(Cmd::SaveDefaultLayout);
+            }
+            if ui.add(item(t!("layout-apply-default"), "")).clicked() {
+                self.cmds.push(Cmd::ApplyDefaultLayout);
+            }
+            if ui.add(item(t!("layout-reset-default"), "")).clicked() {
+                self.cmds.push(Cmd::ResetDefaultLayout);
             }
         });
         widgets::top_menu(ui, &t!("menu-help"), false, |ui| {
@@ -533,16 +192,16 @@ impl MyceliumApp {
 
     /// Вкладки рабочих пространств в верхней строке, как в Blender.
     fn workspace_tabs(&mut self, ui: &mut Ui, pal: &Palette) {
-        let count = self.workspaces.len();
+        let count = self.layout.workspaces.len();
         for i in 0..count {
-            let title = self.workspaces[i].title();
-            let resp = workspace_tab(ui, pal, Id::new(("mycelium-workspace", i)), &title, i == self.active_ws);
+            let title = self.layout.workspaces[i].title();
+            let resp = workspace_tab(ui, pal, Id::new(("mycelium-workspace", i)), &title, i == self.layout.active);
             if resp.double_clicked() {
                 self.cmds.push(Cmd::RenameWorkspace(i));
             } else if resp.clicked() {
                 self.cmds.push(Cmd::SwitchWorkspace(i));
             }
-            let builtin = self.workspaces[i].builtin.is_some();
+            let builtin = self.layout.workspaces[i].builtin.is_some();
             theme::context_menu(&resp, |ui| {
                 if ui.button(t!("workspace-rename")).clicked() {
                     self.cmds.push(Cmd::RenameWorkspace(i));
@@ -563,7 +222,7 @@ impl MyceliumApp {
         egui::Popup::menu(&plus).style(theme::menu_style).show(|ui| self.new_workspace_items(ui));
     }
 
-    fn status_bar(&mut self, ui: &mut Ui) {
+    pub(super) fn status_bar(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
         egui::Panel::bottom("mycelium-status").frame(Frame::new().fill(pal.bg_panel).inner_margin(Margin::symmetric(12, 3))).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -571,13 +230,55 @@ impl MyceliumApp {
                 match &self.project {
                     Some(p) => {
                         ui.label(small("●".into(), pal.success));
-                        ui.label(small(p.name.clone(), pal.text_muted)).on_hover_text(p.root.display().to_string());
+                        ui.label(small(p.name().to_owned(), pal.text_muted)).on_hover_text(p.root.display().to_string());
+                        let info = &p.info;
+                        if info.is_mod() {
+                            let loaders: Vec<&str> = info.loaders.iter().map(|l| l.name()).collect();
+                            let mut text = loaders.join(" + ");
+                            if let Some(mc) = &info.minecraft {
+                                text.push_str(&format!(" · {mc}"));
+                            }
+                            ui.label(small(text, pal.text_faint));
+                        }
                     }
                     None => {
                         ui.label(small(t!("status-no-project"), pal.text_faint));
                     }
                 }
-                let windows = self.dock.windows.len();
+                if self.sync.is_busy() {
+                    ui.label(small(format!("⟳ {}…", t!("status-syncing")), pal.accent));
+                }
+                if let Some(lsp) = &self.lsp {
+                    let (text, color) = match &lsp.status {
+                        crate::lsp::LspStatus::Ready => match lsp.problem_counts() {
+                            (0, 0) => ("☕ Java ✔".to_owned(), pal.text_faint),
+                            (e, w) => (format!("☕ ✖ {e}  ⚠ {w}"), if e > 0 { pal.danger } else { pal.warning }),
+                        },
+                        crate::lsp::LspStatus::NotInstalled => (format!("☕ {}", t!("status-lsp-off")), pal.text_faint),
+                        crate::lsp::LspStatus::Failed(_) | crate::lsp::LspStatus::NoJdk(_) => (format!("☕ {}", t!("status-lsp-error")), pal.danger),
+                        _ => (format!("☕ {}…", t!("status-lsp-busy")), pal.accent),
+                    };
+                    ui.label(small(text, color)).on_hover_text(t!("status-lsp-hint"));
+                }
+                if let crate::run::Status::Running { since } = self.console.status {
+                    let secs = (ui.input(|i| i.time) - since).max(0.0) as u64;
+                    let text = format!("▶ {} · {}:{:02}", self.console.label, secs / 60, secs % 60);
+                    let resp = ui.add(egui::Label::new(small(text, pal.accent)).sense(Sense::click()));
+                    if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+                        self.cmds.push(Cmd::OpenEditor(EditorKind::Console));
+                    }
+                }
+                // Безобидный шум Minecraft в счётчик не входит.
+                let problems: Vec<_> = self.console.problems.problems().iter().filter(|p| !p.sample.noise).collect();
+                if !problems.is_empty() {
+                    let errors = problems.iter().filter(|p| p.sample.crash || p.sample.level >= mycelium_log::Level::Error || p.sample.throwable.is_some()).count();
+                    let warnings = problems.len() - errors;
+                    let resp = ui.add(egui::Label::new(RichText::new(format!("✖ {errors}  ⚠ {warnings}")).size(12.0).color(if errors > 0 { pal.danger } else { pal.warning })).sense(Sense::click()));
+                    if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(t!("status-problems")).clicked() {
+                        self.cmds.push(Cmd::OpenEditor(EditorKind::Exceptions));
+                    }
+                }
+                let windows = self.layout.dock.windows.len();
                 if windows > 0 {
                     ui.label(small("·".into(), pal.text_faint));
                     ui.label(small(t!("status-detached-windows", count = windows), pal.text_faint));
@@ -591,7 +292,7 @@ impl MyceliumApp {
         });
     }
 
-    fn welcome_ui(&mut self, ui: &mut Ui) {
+    pub(super) fn welcome_ui(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
         let logo = icon_texture(ui.ctx(), &mut self.logo, 104.0, "mycelium-logo");
         egui::CentralPanel::default().frame(Frame::new().fill(pal.bg)).show(ui, |ui| {
@@ -637,7 +338,7 @@ impl MyceliumApp {
         });
     }
 
-    fn modals(&mut self, ctx: &egui::Context) {
+    pub(super) fn modals(&mut self, ctx: &egui::Context) {
         let anim_id = Id::new("mycelium-modal-anim");
         // Диалог вынимаем на время отрисовки: внутри него меняются настройки приложения.
         let Some(mut modal) = self.modal.take() else {
@@ -725,7 +426,7 @@ impl MyceliumApp {
             close = true;
         }
         if let Some((index, name)) = rename_done {
-            if let Some(ws) = self.workspaces.get_mut(index) {
+            if let Some(ws) = self.layout.workspaces.get_mut(index) {
                 // Пустое имя возвращает название шаблона на текущем языке.
                 ws.name = if name.is_empty() || (ws.builtin.is_some_and(|b| b.title() == name)) { None } else { Some(name) };
             }
@@ -793,7 +494,7 @@ impl MyceliumApp {
         }
     }
 
-    fn toast_ui(&mut self, ctx: &egui::Context) {
+    pub(super) fn toast_ui(&mut self, ctx: &egui::Context) {
         let now = Self::now(ctx);
         let anim_id = Id::new("mycelium-toast-anim");
         let Some(t) = &self.toast else {

@@ -93,3 +93,28 @@ error-vulkan = Не удалось запустить Forma Mycelium через 
     Проверьте, что драйвер видеокарты поддерживает Vulkan.
 
     Подробности: { $details }
+
+## Проект и раскладка
+
+action-save-all = Сохранить всё
+menu-run = Запуск
+layout-save-default = Сохранить раскладку как стандартную
+layout-save-default-hint = Эту раскладку получат все проекты, у которых ещё нет своей
+layout-apply-default = Применить стандартную раскладку
+layout-reset-default = Сбросить стандартную раскладку к заводской
+status-problems = Открыть окно исключений
+toast-project-initialized = Проект инициализирован: создана папка .mycelium
+toast-default-layout-saved = Раскладка сохранена как стандартная
+toast-default-layout-failed = Не удалось сохранить стандартную раскладку
+toast-default-layout-applied = Применена стандартная раскладка
+toast-default-layout-reset = Стандартная раскладка сброшена к заводской
+toast-file-missing = Файл не найден: { $path }
+toast-source-missing = Исходник не найден: { $class }
+toast-no-sources = Нет исходников для { $class } ({ $jar })
+toast-sync-failed = Не удалось получить модель проекта от Gradle: { $error }
+status-syncing = Синхронизация с Gradle
+toast-definition-missing = Определение не найдено
+status-lsp-off = подсказки выключены
+status-lsp-error = ошибка jdtls
+status-lsp-busy = jdtls разбирает проект
+status-lsp-hint = Подсказки Java (jdtls): ошибки и предупреждения во всём проекте

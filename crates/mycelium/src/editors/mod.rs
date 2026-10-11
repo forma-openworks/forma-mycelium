@@ -1,19 +1,29 @@
 //! Редакторы — то, что живёт во вкладках областей. Каждый вид редактора можно открыть
 //! в любой области и в любом количестве, как в Blender.
 
+pub mod code;
+mod code_assist;
+pub mod console;
+pub mod exceptions;
+pub mod problem_ui;
 mod project;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, Id, RichText, Ui};
 use mycelium_i18n::t;
 use mycelium_layout::TabViewer;
+use mycelium_project::Project;
 use serde::{Deserialize, Serialize};
 
+pub use code::Documents;
 pub use project::ProjectTree;
 
 use crate::app::Cmd;
-use crate::project::Project;
+use crate::run::{Console, RunConfig};
+use crate::lsp::JavaLsp;
+use crate::sync::SyncState;
 use crate::theme::Palette;
 use crate::widgets;
 
@@ -57,8 +67,7 @@ impl EditorKind {
     /// На каком этапе плана редактор наполнится содержимым.
     fn stage(self) -> Option<u32> {
         match self {
-            EditorKind::Project => None,
-            EditorKind::Code | EditorKind::Exceptions | EditorKind::Console => Some(2),
+            EditorKind::Project | EditorKind::Code | EditorKind::Exceptions | EditorKind::Console => None,
             EditorKind::ModMap => Some(3),
             EditorKind::ModelPreview => Some(4),
         }
@@ -92,13 +101,52 @@ impl EditorKind {
 pub struct EditorTab {
     pub id: u64,
     pub kind: EditorKind,
+    /// Файл вкладки «Код» — путь относительно корня проекта (или путь к jar, если задан `entry`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<PathBuf>,
+    /// Файл внутри jar (`net/minecraft/world/item/Item.java`): вкладка только для чтения.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
 }
 
 impl EditorTab {
     pub fn new(kind: EditorKind, next_id: &mut u64) -> Self {
         *next_id += 1;
-        Self { id: *next_id, kind }
+        Self { id: *next_id, kind, file: None, entry: None }
     }
+
+    pub fn file(path: PathBuf, next_id: &mut u64) -> Self {
+        let mut tab = Self::new(EditorKind::Code, next_id);
+        tab.file = Some(path);
+        tab
+    }
+
+    pub fn jar(jar: PathBuf, entry: String, next_id: &mut u64) -> Self {
+        let mut tab = Self::file(jar, next_id);
+        tab.entry = Some(entry);
+        tab
+    }
+
+    /// Ключ документа вкладки в `Documents`.
+    pub fn doc_key(&self, root: &Path) -> Option<PathBuf> {
+        let file = self.file.as_ref()?;
+        Some(match &self.entry {
+            Some(entry) => code::jar_key(file, entry),
+            None => root.join(file),
+        })
+    }
+
+    /// Та же ли это вкладка файла.
+    pub fn shows(&self, file: &Path, entry: Option<&str>) -> bool {
+        self.file.as_deref() == Some(file) && self.entry.as_deref() == entry
+    }
+}
+
+/// Состояние вкладок, которое живёт только пока открыта программа (выбор, фильтры).
+#[derive(Default)]
+pub struct EditorStates {
+    console: HashMap<u64, console::ConsoleView>,
+    exceptions: HashMap<u64, exceptions::ExceptionsView>,
 }
 
 /// Всё, что нужно редакторам для отрисовки. Собирается заново на каждом кадре.
@@ -109,16 +157,44 @@ pub struct Editors<'a> {
     pub recent: &'a [PathBuf],
     pub next_tab_id: &'a mut u64,
     pub cmds: &'a mut Vec<Cmd>,
+    pub docs: &'a mut Documents,
+    pub console: &'a Console,
+    pub sync: &'a SyncState,
+    pub lsp: Option<&'a mut JavaLsp>,
+    pub configs: &'a [RunConfig],
+    pub run_config: &'a mut Option<String>,
+    pub states: &'a mut EditorStates,
+    pub font_size: f32,
+    pub now: f64,
 }
 
 impl TabViewer for Editors<'_> {
     type Tab = EditorTab;
 
     fn title(&mut self, tab: &EditorTab) -> String {
-        tab.kind.title()
+        if let Some(entry) = &tab.entry {
+            return entry.rsplit('/').next().unwrap_or(entry).to_owned();
+        }
+        match &tab.file {
+            Some(file) => {
+                let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let dirty = self.project.is_some_and(|p| self.docs.is_dirty(&p.root.join(file)));
+                if dirty { format!("{name} ●") } else { name }
+            }
+            None => tab.kind.title(),
+        }
     }
 
     fn icon(&mut self, tab: &EditorTab) -> Option<(String, Color32)> {
+        if let Some(entry) = &tab.entry {
+            // Исходники и ресурсы библиотек — приглушённым значком: это чужой код.
+            let (glyph, _) = project::file_icon(entry, false, false);
+            return Some((glyph.to_owned(), self.pal.text_faint));
+        }
+        if let Some(file) = &tab.file {
+            let (glyph, tint) = project::file_icon(&file.to_string_lossy(), false, false);
+            return Some((glyph.to_owned(), tint.unwrap_or(self.pal.text_muted)));
+        }
         Some((tab.kind.icon().to_owned(), tab.kind.color(self.pal)))
     }
 
@@ -127,12 +203,38 @@ impl TabViewer for Editors<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut EditorTab) {
+        let pal = self.pal;
         match tab.kind {
             EditorKind::Project => match self.project {
-                Some(project) => self.tree.ui(ui, self.pal, project, tab.id),
-                None => no_project(ui, self.pal, self.recent, self.cmds),
+                Some(project) => self.tree.ui(ui, pal, project, self.sync, tab.id, self.cmds),
+                None => no_project(ui, pal, self.recent, self.cmds),
             },
-            kind => placeholder(ui, self.pal, kind),
+            EditorKind::Code => match (self.project, &tab.file, &tab.entry) {
+                (Some(_), Some(jar), Some(entry)) => {
+                    // Путь в заголовке: jar › путь внутри.
+                    let jar_name = jar.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let rel = format!("{jar_name}/{entry}");
+                    let doc = self.docs.open_jar(jar, entry);
+                    code::ui(ui, doc, &rel, pal, tab.id, self.font_size, self.now, None, self.cmds);
+                }
+                (Some(project), Some(file), None) => {
+                    let rel = file.to_string_lossy().into_owned();
+                    let doc = self.docs.open(&project.root.join(file));
+                    code::ui(ui, doc, &rel, pal, tab.id, self.font_size, self.now, self.lsp.as_deref_mut(), self.cmds);
+                }
+                _ => empty_state(ui, pal, EditorKind::Code.icon(), &t!("code-empty-title"), &t!("code-empty-hint")),
+            },
+            EditorKind::Console => {
+                let view = self.states.console.entry(tab.id).or_default();
+                let libs = self.project.and_then(|p| p.libraries.as_deref());
+                console::ui(ui, pal, view, self.console, libs, self.configs, self.run_config, self.project.is_some(), self.now, self.cmds);
+            }
+            EditorKind::Exceptions => {
+                let view = self.states.exceptions.entry(tab.id).or_default();
+                let libs = self.project.and_then(|p| p.libraries.as_deref());
+                exceptions::ui(ui, pal, view, self.console, libs, self.cmds);
+            }
+            kind => placeholder(ui, pal, kind),
         }
     }
 
@@ -148,8 +250,37 @@ impl TabViewer for Editors<'_> {
     }
 
     fn duplicate(&mut self, tab: &EditorTab) -> EditorTab {
-        EditorTab::new(tab.kind, self.next_tab_id)
+        let mut copy = EditorTab::new(tab.kind, self.next_tab_id);
+        copy.file = tab.file.clone();
+        copy.entry = tab.entry.clone();
+        copy
     }
+
+    fn on_close(&mut self, tab: EditorTab) {
+        // Закрытая вкладка файла сохраняет его сразу, не дожидаясь автосохранения.
+        if let Some(key) = self.project.and_then(|p| tab.doc_key(&p.root)) {
+            if let Some(doc) = self.docs.get_mut(&key) {
+                if let Err(e) = doc.save() {
+                    log::warn!("{e}");
+                }
+            }
+        }
+        self.states.console.remove(&tab.id);
+        self.states.exceptions.remove(&tab.id);
+    }
+}
+
+/// Пустое состояние редактора: значок, заголовок, подсказка.
+pub fn empty_state(ui: &mut Ui, pal: &Palette, icon: &str, title: &str, hint: &str) {
+    let height = ui.available_height();
+    ui.vertical_centered(|ui| {
+        ui.add_space((height * 0.3 - 50.0).max(12.0));
+        ui.label(RichText::new(icon).size(30.0).color(pal.text_faint));
+        ui.add_space(4.0);
+        ui.label(RichText::new(title).size(15.0).family(crate::fonts::semibold()).color(pal.heading));
+        ui.add_space(2.0);
+        widgets::centered_text(ui, hint, 13.0, pal.text_muted, 380.0);
+    });
 }
 
 /// Заглушка: что будет в редакторе и на каком этапе он появится.

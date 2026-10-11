@@ -1,0 +1,82 @@
+// Forma Mycelium: выгрузка модели проекта в JSON — модули, исходники, зависимости
+// с путями к jar, JDK тулчейна и задачи запуска. Подключается через --init-script,
+// в сам проект ничего не записывается.
+//
+// Запуск: gradlew --init-script model.gradle -Pmycelium.out=<файл> myceliumModel
+
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+
+def describe(Project p) {
+    def info = [path: p.path, dir: p.projectDir.absolutePath, sourceSets: [], dependencies: [], runTasks: []]
+    def sourceSets = p.extensions.findByName('sourceSets')
+    if (sourceSets != null) {
+        sourceSets.each { s ->
+            def kotlin = []
+            try {
+                def ext = p.extensions.findByName('kotlin')
+                def ks = ext?.sourceSets?.findByName(s.name)
+                if (ks != null) kotlin = ks.kotlin.srcDirs*.absolutePath
+            } catch (Throwable ignored) {}
+            info.sourceSets << [
+                name: s.name,
+                java: s.java.srcDirs*.absolutePath,
+                kotlin: kotlin,
+                resources: s.resources.srcDirs*.absolutePath,
+            ]
+        }
+    }
+    def cfg = p.configurations.findByName('compileClasspath')
+    if (cfg != null && cfg.canBeResolved) {
+        try {
+            cfg.incoming.artifactView { lenient = true }.artifacts.each { a ->
+                def id = a.id.componentIdentifier
+                def d = [file: a.file.absolutePath]
+                if (id instanceof ModuleComponentIdentifier) {
+                    d.group = id.group
+                    d.name = id.module
+                    d.version = id.version
+                } else if (id instanceof ProjectComponentIdentifier) {
+                    d.project = id.projectPath
+                }
+                info.dependencies << d
+            }
+        } catch (Throwable e) {
+            info.error = e.toString()
+        }
+    }
+    try {
+        def java = p.extensions.findByName('java')
+        def toolchains = p.extensions.findByName('javaToolchains')
+        if (java != null && toolchains != null) {
+            def meta = toolchains.launcherFor(java.toolchain).get().metadata
+            info.jdk = [home: meta.installationPath.asFile.absolutePath, version: meta.languageVersion.toString()]
+        }
+    } catch (Throwable ignored) {}
+    // Задачи запуска игры: runClient, runServer, runData, runGameTestServer…
+    info.runTasks = p.tasks.names.findAll { it.length() > 3 && it.startsWith('run') && Character.isUpperCase(it.charAt(3)) }.sort()
+    return info
+}
+
+gradle.rootProject { root ->
+    root.tasks.register('myceliumModel') {
+        group = 'forma mycelium'
+        description = 'Writes the project model for Forma Mycelium'
+        if (it.metaClass.respondsTo(it, 'notCompatibleWithConfigurationCache', String)) {
+            notCompatibleWithConfigurationCache('reads the whole project model')
+        }
+        doLast {
+            def model = [gradle: root.gradle.gradleVersion, projects: root.allprojects.collect { describe(it) }]
+            def json = JsonOutput.prettyPrint(JsonOutput.toJson(model))
+            def out = root.findProperty('mycelium.out')
+            if (out) {
+                def file = new File(out.toString())
+                file.parentFile?.mkdirs()
+                file.setText(json, 'UTF-8')
+            } else {
+                println json
+            }
+        }
+    }
+}

@@ -1,0 +1,21 @@
+// Forma Mycelium: jdtls импортирует Gradle-проект как проект Eclipse, а Eclipse по умолчанию
+// складывает скомпилированные классы в папку bin/ прямо в корне мода. Этот init-скрипт
+// переносит их в build/eclipse/ — туда, где Gradle и так держит всё сгенерированное.
+// В сам проект ничего не записывается: скрипт подключается только к импорту jdtls.
+
+allprojects {
+    plugins.withType(JavaBasePlugin).configureEach {
+        apply plugin: 'eclipse'
+        eclipse.classpath { cp ->
+            cp.defaultOutputDir = file('build/eclipse/default')
+            if (cp.hasProperty('baseSourceOutputDir')) {
+                cp.baseSourceOutputDir = file('build/eclipse')
+            }
+            cp.file.whenMerged { classpath ->
+                classpath.entries.findAll { it.kind == 'src' && it.hasProperty('output') && it.output != null && it.output.startsWith('bin/') }.each {
+                    it.output = 'build/eclipse/' + it.output.substring(4)
+                }
+            }
+        }
+    }
+}

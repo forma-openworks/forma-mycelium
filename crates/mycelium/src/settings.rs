@@ -12,6 +12,11 @@ pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("Forma").join("Mycelium"))
 }
 
+/// Кеши, индексы, языковые серверы: `%LOCALAPPDATA%\Forma\Mycelium`.
+pub fn cache_dir() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|d| d.join("Forma").join("Mycelium"))
+}
+
 /// Пользовательские переводы: `%APPDATA%\Forma\Mycelium\locales\<язык>\*.ftl`.
 pub fn user_locales_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("locales"))

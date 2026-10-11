@@ -4,9 +4,12 @@
 mod app;
 mod editors;
 mod fonts;
+mod highlight;
 mod icon;
-mod project;
+mod lsp;
+mod run;
 mod settings;
+mod sync;
 mod theme;
 mod widgets;
 mod workspace;
