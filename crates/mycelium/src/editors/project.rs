@@ -96,48 +96,35 @@ impl ProjectTree {
             *self = Self { root: Some(project.root.clone()), show_hidden: self.show_hidden, libs_open: self.libs_open, ..Self::default() };
         }
         ui.add_space(6.0);
-        // Кнопки справа ставятся первыми, имя проекта занимает оставшееся место и
-        // обрезается многоточием, а не залезает под кнопки. Если имени совсем тесно,
-        // кнопки уходят на строку ниже.
+        // Кнопки справа ставятся первыми и всегда остаются в строке, а имя проекта
+        // занимает оставшееся место и в тесноте постепенно обрезается многоточием.
         let name = RichText::new(project.name()).family(forma_ui::fonts::semibold()).color(pal.heading);
-        let buttons_w = 3.0 * (ui.spacing().interact_size.y + ui.spacing().item_spacing.x) + 16.0;
-        let stacked = ui.available_width() - buttons_w < 110.0;
-        let mut buttons = |ui: &mut Ui| {
-            ui.add_space(6.0);
-            if forma_ui::icons::button(ui, "refresh", false).on_hover_text(t!("project-refresh")).clicked() {
-                self.refresh();
-                cmds.push(Cmd::Redetect);
-                cmds.push(Cmd::SyncGradle);
-            }
-            if forma_ui::icons::button(ui, "collapse-all", false).on_hover_text(t!("project-collapse-all")).clicked() {
-                self.expanded.clear();
-            }
-            let hidden = forma_ui::icons::button(ui, "show", self.show_hidden).on_hover_text(if self.show_hidden {
-                t!("project-hide-hidden")
-            } else {
-                t!("project-show-hidden")
-            });
-            if hidden.clicked() {
-                self.show_hidden = !self.show_hidden;
-            }
-        };
         let root_hint = project.root.display().to_string();
         ui.horizontal(|ui| {
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if stacked {
-                    ui.add_space(6.0);
+                ui.add_space(6.0);
+                if forma_ui::icons::button(ui, "refresh", false).on_hover_text(t!("project-refresh")).clicked() {
+                    self.refresh();
+                    cmds.push(Cmd::Redetect);
+                    cmds.push(Cmd::SyncGradle);
+                }
+                if forma_ui::icons::button(ui, "collapse-all", false).on_hover_text(t!("project-collapse-all")).clicked() {
+                    self.expanded.clear();
+                }
+                let hidden = forma_ui::icons::button(ui, "show", self.show_hidden).on_hover_text(if self.show_hidden {
+                    t!("project-hide-hidden")
                 } else {
-                    buttons(ui);
+                    t!("project-show-hidden")
+                });
+                if hidden.clicked() {
+                    self.show_hidden = !self.show_hidden;
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(name).truncate()).on_hover_text(root_hint);
                 });
             });
         });
-        if stacked {
-            ui.horizontal(|ui| ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| buttons(ui)));
-        }
         mod_info(ui, pal, project);
         ui.add_space(4.0);
         egui::ScrollArea::vertical().id_salt(("project-tree", tab_id)).auto_shrink(false).show(ui, |ui| {
@@ -302,10 +289,9 @@ impl ProjectTree {
             }
             let (glyph, tint) = if node.is_class() { ("file-java", Some(pal.text_muted)) } else { file_icon(&node.name, false, false) };
             let resp = tree_row(ui, pal, depth, None, glyph, tint.unwrap_or(pal.text_faint), &node.name, pal.text, None, selected);
+            // Файл открывается одним щелчком.
             if resp.clicked() {
                 self.lib_selected = Some(key.clone());
-            }
-            if resp.double_clicked() {
                 cmds.push(Cmd::OpenLibraryEntry { lib: node.lib, entry: node.path.clone() });
             }
             forma_ui::theme::context_menu(&resp, |ui| {
@@ -338,11 +324,10 @@ impl ProjectTree {
                         self.expanded.insert(entry.path.clone());
                     }
                 } else {
+                    // Файл открывается одним щелчком.
                     self.selected = Some(entry.path.clone());
+                    cmds.push(Cmd::OpenFile { path: entry.path.clone(), line: None });
                 }
-            }
-            if resp.double_clicked() && !entry.dir {
-                cmds.push(Cmd::OpenFile { path: entry.path.clone(), line: None });
             }
             forma_ui::theme::context_menu(&resp, |ui| {
                 if !entry.dir && ui.button(t!("project-open")).clicked() {

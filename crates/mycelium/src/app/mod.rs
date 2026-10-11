@@ -5,6 +5,7 @@
 //! стандартную»), а если и её нет — заводскую. Без проекта используется отдельная раскладка
 //! в папке настроек.
 
+mod caption;
 mod chrome;
 mod look;
 mod run_configs;
@@ -35,7 +36,7 @@ use crate::discord::{self, ModLinks, PresenceInput, Presence};
 use crate::lsp::{JavaLsp, LspEvent, LspStatus};
 use crate::sync::{GradleSync, SyncResult};
 use forma_ui::fonts::Choice;
-use forma_ui::theme::{self, Accent, Palette, Theme, Themes};
+use forma_ui::theme::{self, Palette, Theme, Themes};
 use crate::workspace::{self, Builtin, Layout, ViewState, Workspace};
 
 pub const APP_TITLE: &str = "Forma Mycelium";
@@ -174,7 +175,6 @@ struct Toast {
 #[derive(Clone, Debug, PartialEq)]
 struct StyleKey {
     theme: String,
-    accent: Option<Accent>,
     themes_rev: u64,
     ui_size: u32,
     max_keys: Vec<Shortcut>,
@@ -241,6 +241,8 @@ pub struct MyceliumApp {
     opened_unix: u64,
     logo: Option<(u32, egui::TextureHandle)>,
     mark: Option<(u32, egui::TextureHandle)>,
+    /// Высота верхней строки на прошлом кадре — под неё подстраиваются кнопки окна.
+    caption_h: f32,
 }
 
 /// Какие шрифты ставить: свои из настроек или шрифты темы.
@@ -270,6 +272,8 @@ fn default_layout() -> Layout {
 impl MyceliumApp {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, store: Store, project_arg: Option<PathBuf>) -> Self {
         let ctx = &cc.egui_ctx;
+        // Системной рамки у окна нет — шапку рисует программа (см. `caption`).
+        caption::round_corners(cc);
         crate::highlight::warm_up();
         // Список шрифтов системы нужен странице «Шрифты» и темам со своими шрифтами.
         forma_ui::fonts::warm_up();
@@ -280,10 +284,10 @@ impl MyceliumApp {
             o.quit_shortcuts.clear();
         });
         ctx.set_zoom_factor(settings.appearance.zoom.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
-        let plugins = crate::plugins::open();
+        let plugins = crate::plugins::open(&settings.appearance.theme);
         let mut themes = Themes::new(BUILTIN_THEMES, settings::user_themes_dir());
         themes.set_plugin_dirs(crate::plugins::theme_dirs(&plugins, &settings.plugins));
-        let theme = themes.resolve(&settings.appearance.theme, DEFAULT_THEME, settings.appearance.accent);
+        let theme = themes.resolve(&settings.appearance.theme, DEFAULT_THEME);
         let pal = theme.pal.clone();
         // Шрифты нужны уже в первом кадре: egui применяет новые шрифты только со следующего.
         let fonts_choice = font_choice(&settings.fonts, &theme.fonts);
@@ -344,6 +348,7 @@ impl MyceliumApp {
             opened_unix: run::unix_now(),
             logo: None,
             mark: None,
+            caption_h: caption::WELCOME_H,
         };
         // Как в IDEA: при запуске снова открывается последний проект.
         let path = project_arg.or_else(|| app.settings.recent.last.clone().filter(|p| p.is_dir()));
@@ -724,6 +729,12 @@ impl MyceliumApp {
                     }
                 }
                 Cmd::UninstallPlugin(id) => {
+                    // Выбранная тема из удаляемого плагина пропадёт — возвращаем тему по умолчанию.
+                    if let Some(dir) = self.plugins.get(&id).map(|p| p.dir.clone())
+                        && self.themes.get(&self.settings.appearance.theme).is_some_and(|t| matches!(&t.origin, theme::Origin::Plugin(p) if p.starts_with(&dir)))
+                    {
+                        self.settings.appearance.theme = String::new();
+                    }
                     // Сначала отпускаем файлы плагина: jdtls останавливается.
                     if id == crate::plugins::JDTLS {
                         if let Some(l) = &mut self.lsp {
@@ -857,7 +868,9 @@ impl MyceliumApp {
                 Cmd::QuickSwitchTheme => self.modal = Some(Modal::ThemeSwitcher(look::ThemeSwitcher::new(&self.settings.appearance.theme, &self.themes))),
                 Cmd::FontZoom { console, step } => {
                     let slot = if console { &mut self.settings.fonts.console } else { &mut self.settings.fonts.editor };
-                    slot.size = (slot.size + step).clamp(*forma_ui::fonts::SIZE_RANGE.start(), *forma_ui::fonts::SIZE_RANGE.end());
+                    // Размер — с шагом в полпикселя, как у ползунка в настройках.
+                    let size = ((slot.size + step) * 2.0).round() / 2.0;
+                    slot.size = size.clamp(*forma_ui::fonts::SIZE_RANGE.start(), *forma_ui::fonts::SIZE_RANGE.end());
                 }
                 Cmd::About => self.modal = Some(Modal::About),
                 Cmd::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -938,13 +951,12 @@ impl MyceliumApp {
         let a = &self.settings.appearance;
         let key = StyleKey {
             theme: a.theme.clone(),
-            accent: a.accent,
             themes_rev: self.themes_rev,
             ui_size: self.settings.fonts.ui.size.to_bits(),
             max_keys: self.settings.keymap.shortcuts(&self.actions, actions::MAXIMIZE).to_vec(),
         };
         if self.style_key.as_ref() != Some(&key) {
-            self.theme = self.themes.resolve(&key.theme, DEFAULT_THEME, key.accent);
+            self.theme = self.themes.resolve(&key.theme, DEFAULT_THEME);
             self.pal = self.theme.pal.clone();
             self.theme_gen += 1;
             crate::highlight::set_theme(&self.theme, self.theme_gen);
@@ -1182,6 +1194,7 @@ impl eframe::App for MyceliumApp {
         self.paint_backdrop(&ctx);
         self.modals(&ctx);
         self.toast_ui(&ctx);
+        self.window_frame(&ctx);
         self.process_cmds(&ctx);
         self.update_title(&ctx);
         self.update_presence(now);

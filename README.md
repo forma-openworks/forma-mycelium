@@ -75,20 +75,21 @@ The name comes from mycelium, the network that quietly connects everything aroun
 
 **Feels like home**
 - **A layout in the spirit of Blender.** Any area splits into tabs. Tabs can be dragged between areas or torn out into separate OS windows.
+- **A window frame of its own.** The Windows title bar is replaced by the app's top bar with minimize, maximize and close buttons. Drag the bar to move the window, double-click it to maximize.
 - **Workspaces** (Code, Map, Assets, Debug), each with its own layout. A layout can be saved per project, or as the default for all projects.
 - **Discord Rich Presence:** "Mod: Your Mod (yourmod)" with a live status (writing code, running the client, fixing a crash…), a timer and the loader badge. It can be turned off, and a project can be marked secret.
 - **English and Russian UI,** switchable on the fly, plus **English · Russian hints**: menus and terms stay in English, as in modding guides, while hints and explanations are in Russian. Extra languages can be added as Fluent files.
 - **Themes where everything can be restyled:**
-  - built-in themes: Mycelium Dark Default, Mycelium Light Default and Visual Studio Dark;
+  - default themes Mycelium Dark and Mycelium Light (marked "Default" in theme lists), plus Visual Studio Dark as a one-click theme plugin;
   - your own themes are `.toml` files that override only what they change, so a pink menu bar is literally one line (`"menubar.bg" = "#ff69b4"`). They reload as soon as you save them;
   - a theme sets every region (menu bar, status bar, tabs, editor, popups, buttons, console, origin colors), code highlighting with bold and italic, and optionally its own fonts and background picture;
   - **Quick switch theme** (``Ctrl+` ``): hover or use the arrows to preview, Enter keeps it, Esc brings the old one back;
   - **icons** come from the [Lucide](https://lucide.dev) set. A theme can replace any icon with its own SVG and recolor any icon with an `icon.<name>` key;
   - **tools for theme authors:** *Create theme* writes a new theme file that lists every key, highlight class and icon, and the *Theme inspector* shows them all with their current values.
-- **Fonts:** separate fonts for the interface, the code editor and the console, picked from the fonts installed on your system, with size in pixels and line height. `Ctrl+mouse wheel` resizes the editor and console font.
+- **Fonts:** separate fonts for the interface, the code editor and the console, picked from the fonts installed on your system, with size in pixels and line height. `Ctrl+mouse wheel` resizes the editor and console font in half-pixel steps.
 - **A background picture,** drawn semi-transparent over the window, like in Rider.
 - **Narrow areas keep working.** Text is shortened with an ellipsis, toolbars wrap or fold their filters into a menu, extra tabs and workspaces move into a » menu, and dialogs scroll instead of overflowing the window.
-- **Plugins.** Anything big and optional is a plugin: the Java language server now, Kotlin and Python later. The Plugins page has Recommended and Installed tabs, one-click installs with progress, an on/off switch, and theme packs installed from a `.zip`. Recommended plugins are also offered on the welcome screen.
+- **Plugins.** Anything big and optional is a plugin: the Java language server and the Visual Studio Dark theme now, Kotlin and Python later. The Plugins page has Recommended and Installed tabs, one-click installs with progress, an on/off switch, and theme packs installed from a `.zip`. Recommended plugins are also offered on the welcome screen.
 - **Settings in the spirit of JetBrains IDEs:**
   - a settings window with a page tree and search across every option;
   - changes are applied with Apply or OK and discarded with Cancel;
@@ -182,6 +183,7 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 | `crates/forma-ui/icons/lucide/` | The Lucide icons used by the app and their license |
 | `crates/forma-plugins` | Plugins: the manifest, installing, removing, turning on and off |
 | `crates/mycelium/themes/` | Built-in themes |
+| `crates/mycelium/plugins/` | Plugins the app carries inside (the Visual Studio Dark theme) |
 | `crates/forma-actions` | Actions and the keymap |
 | `crates/forma-settings` | Settings components, their files, export and import |
 | `crates/forma-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks |
@@ -258,20 +260,21 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 
 **Удобен как дом**
 - **Раскладка в духе Blender.** Любая область делится на вкладки. Их можно перетаскивать между областями и выносить в отдельные окна ОС.
+- **Своя рамка окна.** Вместо заголовка Windows — верхняя строка программы с кнопками «Свернуть», «Развернуть» и «Закрыть». За строку окно перетаскивается, двойной щелчок разворачивает его.
 - **Рабочие пространства** («Код», «Карта», «Ассеты», «Отладка»), у каждого своя раскладка. Её можно сохранить для проекта или как стандартную для всех.
 - **Активность в Discord:** «Mod: Your Mod (yourmod)» с живым статусом (пишет код, запущен клиент, разбирается с крашем…), таймером и значком загрузчика. Её можно выключить, а проект — сделать секретным.
 - **Интерфейс на русском и английском,** язык переключается на лету. Есть и **English · русские подсказки**: меню и термины на английском, как в руководствах по моддингу, а подсказки и объяснения по-русски. Другие языки добавляются файлами Fluent.
 - **Темы, в которых перекрашивается всё:**
-  - встроенные темы: Mycelium Dark Default, Mycelium Light Default и Visual Studio Dark;
+  - темы по умолчанию Mycelium Dark и Mycelium Light (в списках тем помечены «По умолчанию») и Visual Studio Dark — плагин темы, ставится одной кнопкой;
   - свои темы — файлы `.toml`, где задаётся только то, что меняется. Розовая шапка — буквально одна строка (`"menubar.bg" = "#ff69b4"`). Темы обновляются сразу после сохранения файла;
   - тема задаёт каждую область (шапку, строку состояния, вкладки, редактор, всплывающие окна, кнопки, консоль, цвета происхождения), подсветку кода с жирным и курсивом, а при желании — свои шрифты и фоновую картинку;
   - **быстрая смена темы** (``Ctrl+` ``): наведение или стрелки — посмотреть, Enter — оставить, Esc — вернуть прежнюю;
   - **значки** — из набора [Lucide](https://lucide.dev). Тема может заменить любой значок своим SVG и перекрасить любой значок ключом `icon.<имя>`;
   - **инструменты для авторов тем:** «Создать тему» пишет новый файл темы, где перечислены все ключи, классы подсветки и значки, а «Инспектор темы» показывает их все с текущими значениями.
-- **Шрифты:** отдельные для интерфейса, редактора кода и консоли, из установленных в системе, с размером в пикселях и высотой строки. `Ctrl+колёсико` меняет размер шрифта редактора и консоли.
+- **Шрифты:** отдельные для интерфейса, редактора кода и консоли, из установленных в системе, с размером в пикселях и высотой строки. `Ctrl+колёсико` меняет размер шрифта редактора и консоли с шагом в полпикселя.
 - **Фоновая картинка** полупрозрачно поверх окна, как в Rider.
 - **Узкие области не ломаются.** Текст сокращается многоточием, панели переносятся или прячут фильтры в меню, лишние вкладки и рабочие пространства уходят в меню «»», а диалоги прокручиваются, а не вылезают за окно.
-- **Плагины.** Всё большое и необязательное — плагин: сейчас языковой сервер Java, потом Kotlin и Python. На странице «Плагины» есть вкладки «Рекомендуемое» и «Установленные», установка в одну кнопку с прогрессом, включение и выключение, а наборы тем ставятся из `.zip`. Рекомендуемые плагины предлагаются и на экране приветствия.
+- **Плагины.** Всё большое и необязательное — плагин: сейчас языковой сервер Java и тема Visual Studio Dark, потом Kotlin и Python. На странице «Плагины» есть вкладки «Рекомендуемое» и «Установленные», установка в одну кнопку с прогрессом, включение и выключение, а наборы тем ставятся из `.zip`. Рекомендуемые плагины предлагаются и на экране приветствия.
 - **Настройки в духе IDE от JetBrains:**
   - окно настроек с деревом страниц и поиском по всем пунктам;
   - изменения применяются кнопками «Применить» или «ОК» и отменяются «Отменой»;
@@ -365,6 +368,7 @@ cargo test
 | `crates/forma-ui/icons/lucide/` | Значки Lucide, которые использует программа, и их лицензия |
 | `crates/forma-plugins` | Плагины: описание, установка, удаление, включение и выключение |
 | `crates/mycelium/themes/` | Встроенные темы |
+| `crates/mycelium/plugins/` | Плагины, которые программа везёт в себе (тема Visual Studio Dark) |
 | `crates/forma-actions` | Действия и раскладка клавиш |
 | `crates/forma-settings` | Компоненты настроек, их файлы, экспорт и импорт |
 | `crates/forma-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов |

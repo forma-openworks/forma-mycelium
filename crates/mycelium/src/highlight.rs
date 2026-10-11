@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn highlights_with_colors() {
         let themes = forma_ui::theme::Themes::new(crate::colors::BUILTIN_THEMES, None);
-        set_theme(&themes.resolve("vs-dark", crate::colors::DEFAULT_THEME, None), 1);
+        set_theme(&themes.resolve(crate::colors::DEFAULT_THEME, crate::colors::DEFAULT_THEME), 1);
         let theme = current().read().unwrap().theme.clone();
         let job = build_job("fn main() { let x = 42; } // привет", "rust", &theme, 14.0, 20.0);
         let colors: std::collections::HashSet<_> = job.sections.iter().map(|s| s.format.color).collect();

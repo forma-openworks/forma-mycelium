@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Id, Key, LayerId, Modifiers, Order, Pos2, Rect, RichText, Sense, Ui, vec2};
 use forma_i18n::t;
-use forma_ui::theme::{Background, Fit, Palette, Themes};
+use forma_ui::theme::{Background, Fit, Origin, Palette, Themes};
 
 use super::MyceliumApp;
 
@@ -89,7 +89,7 @@ impl MyceliumApp {
         // Длинный список тем в низком окне прокручивается.
         let max_h = (ui.ctx().content_rect().height() - 200.0).max(90.0);
         egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
-            for (i, (_, name, dark)) in s.themes.iter().enumerate() {
+            for (i, (_, name, dark, builtin)) in s.themes.iter().enumerate() {
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
                 // Наведение сразу показывает тему; движение мыши без наведения ничего не меняет.
                 if resp.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
@@ -102,7 +102,9 @@ impl MyceliumApp {
                     }
                 }
                 let color = if i == s.selected { pal.heading } else { pal.text };
-                let tag = if *dark { t!("theme-dark") } else { t!("theme-light") };
+                // Справа: «По умолчанию» у встроенных тем и тёмная ли тема.
+                let kind = if *dark { t!("theme-dark") } else { t!("theme-light") };
+                let tag = if *builtin { format!("{} · {kind}", t!("theme-default")) } else { kind };
                 let tag = ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, tag, FontId::proportional(11.5), pal.text_faint);
                 let name = forma_ui::widgets::elide(ui, name.clone(), FontId::proportional(13.5), color, tag.left() - 12.0 - (rect.left() + 12.0));
                 ui.painter().galley(egui::pos2(rect.left() + 12.0, rect.center().y - name.size().y / 2.0), name, color);
@@ -127,8 +129,8 @@ impl MyceliumApp {
 
 /// Быстрая смена темы: список и тема, которую вернуть при отмене.
 pub(super) struct ThemeSwitcher {
-    /// id, название, тёмная ли.
-    themes: Vec<(String, String, bool)>,
+    /// id, название, тёмная ли, встроенная ли.
+    themes: Vec<(String, String, bool, bool)>,
     selected: usize,
     original: String,
     /// Тема выбрана (Enter или щелчок) — при закрытии её не откатываем.
@@ -137,7 +139,7 @@ pub(super) struct ThemeSwitcher {
 
 impl ThemeSwitcher {
     pub(super) fn new(current: &str, themes: &Themes) -> Self {
-        let list: Vec<(String, String, bool)> = themes.list().iter().map(|t| (t.id.clone(), t.name.clone(), t.dark)).collect();
+        let list: Vec<(String, String, bool, bool)> = themes.list().iter().map(|t| (t.id.clone(), t.name.clone(), t.dark, t.origin == Origin::Builtin)).collect();
         let shown = if current.is_empty() { crate::colors::DEFAULT_THEME } else { current };
         let selected = list.iter().position(|(id, ..)| id == shown).unwrap_or(0);
         Self { themes: list, selected, original: current.to_owned(), committed: false }

@@ -3,8 +3,8 @@
 
 use std::sync::{Arc, OnceLock, RwLock};
 
-/// Встроенные темы: тёмная по умолчанию идёт первой.
-pub const BUILTIN_THEMES: &[&str] = &[include_str!("../themes/mycelium-dark.toml"), include_str!("../themes/mycelium-light.toml"), include_str!("../themes/vs-dark.toml")];
+/// Встроенные темы: тёмная по умолчанию идёт первой. Остальные темы — плагины.
+pub const BUILTIN_THEMES: &[&str] = &[include_str!("../themes/mycelium-dark.toml"), include_str!("../themes/mycelium-light.toml")];
 
 /// Тема, если в настройках ничего не выбрано.
 pub const DEFAULT_THEME: &str = "mycelium-dark";
@@ -79,7 +79,7 @@ fn slot() -> &'static RwLock<Arc<ModColors>> {
     static CURRENT: OnceLock<RwLock<Arc<ModColors>>> = OnceLock::new();
     CURRENT.get_or_init(|| {
         let themes = forma_ui::theme::Themes::new(BUILTIN_THEMES, None);
-        RwLock::new(Arc::new(themes.resolve(DEFAULT_THEME, DEFAULT_THEME, None).group(ModColors::TOKENS, ModColors::resolve)))
+        RwLock::new(Arc::new(themes.resolve(DEFAULT_THEME, DEFAULT_THEME).group(ModColors::TOKENS, ModColors::resolve)))
     })
 }
 
@@ -100,11 +100,21 @@ mod tests {
 
     #[test]
     fn builtin_themes_resolve_cleanly() {
-        let themes = Themes::new(BUILTIN_THEMES, None);
+        // Темы из плагинов программы проверяются вместе со встроенными.
+        let plugin_themes: Vec<&str> = crate::plugins::catalog()
+            .into_iter()
+            .filter_map(|e| match e.source {
+                forma_plugins::Source::Bundled { files } => Some(files.iter().filter(|(p, _)| p.ends_with(".toml")).map(|(_, text)| *text).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let all: Vec<&str> = BUILTIN_THEMES.iter().copied().chain(plugin_themes).collect();
+        let themes = Themes::new(&all, None);
         let ids: Vec<&str> = themes.list().iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, vec!["mycelium-dark", "mycelium-light", "vs-dark"]);
         for id in ids {
-            let t = themes.resolve(id, DEFAULT_THEME, None);
+            let t = themes.resolve(id, DEFAULT_THEME);
             assert!(t.errors.is_empty(), "{id}: {:?}", t.errors);
             let _ = t.group(ModColors::TOKENS, ModColors::resolve);
             for (class, _) in crate::highlight::CLASS_SELECTORS {
@@ -112,6 +122,6 @@ mod tests {
             }
         }
         let names: Vec<String> = themes.list().iter().map(|t| t.name.clone()).collect();
-        assert_eq!(names, vec!["Mycelium Dark Default", "Mycelium Light Default", "Visual Studio Dark"]);
+        assert_eq!(names, vec!["Mycelium Dark", "Mycelium Light", "Visual Studio Dark"]);
     }
 }

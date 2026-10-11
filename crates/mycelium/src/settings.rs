@@ -12,7 +12,6 @@ use forma_plugins::PluginSettings;
 use forma_settings::{AppInfo, Component, Store};
 use forma_ui::appearance::Appearance;
 use forma_ui::fonts::Fonts;
-use forma_ui::theme::Accent;
 use serde::{Deserialize, Serialize};
 
 pub const APP: AppInfo = AppInfo { id: "mycelium", dir_name: "Mycelium", title: "Forma Mycelium", version: env!("CARGO_PKG_VERSION") };
@@ -125,7 +124,6 @@ impl Settings {
 struct Legacy {
     language: Option<String>,
     theme: String,
-    accent: Accent,
     font_size: f32,
     zoom: f32,
     recent_projects: Vec<PathBuf>,
@@ -139,7 +137,6 @@ impl Default for Legacy {
         Self {
             language: a.language,
             theme: "Dark".to_owned(),
-            accent: Accent::Violet,
             font_size: 16.0,
             zoom: a.zoom,
             recent_projects: Vec::new(),
@@ -158,7 +155,7 @@ impl Legacy {
         let mut fonts = Fonts::default();
         fonts.ui.size = (self.font_size * 0.9 * 2.0).round() / 2.0;
         Settings {
-            appearance: Appearance { language: self.language, theme: theme.to_owned(), accent: Some(self.accent), zoom: self.zoom, ..Appearance::default() },
+            appearance: Appearance { language: self.language, theme: theme.to_owned(), zoom: self.zoom, ..Appearance::default() },
             fonts,
             keymap: Keymap::default(),
             discord: Discord { enabled: self.discord_presence },
@@ -207,7 +204,6 @@ mod tests {
         let s = serde_json::from_str::<Legacy>(json).unwrap().into_settings();
         assert_eq!(s.appearance.language.as_deref(), Some("ru"));
         assert_eq!(s.appearance.theme, "mycelium-light");
-        assert_eq!(s.appearance.accent, Some(Accent::Teal));
         assert_eq!(s.fonts.ui.size, 13.5);
         assert_eq!(s.appearance.zoom, 1.25);
         assert!(!s.discord.enabled);

@@ -3,10 +3,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use eframe::egui::{
-    self, Align, Align2, CornerRadius, FontId, Frame, Id, Key, Margin, Modifiers, RichText, Sense, TextEdit, Ui,
+    self, Align, Align2, CornerRadius, FontId, Frame, Galley, Id, Key, Margin, Modifiers, RichText, Sense, TextEdit, Ui,
     text::{CCursor, CCursorRange},
     vec2,
 };
@@ -379,15 +380,16 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
     let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
         let mut job = crate::highlight::job(ui.ctx(), buf.as_str(), lang, size, line_height);
         job.wrap.max_width = f32::INFINITY;
-        ui.fonts_mut(|f| f.layout_job(job))
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        center_rows(ui.ctx(), id, galley)
     };
 
     let avail = ui.available_size();
     // Ctrl+колёсико над редактором меняет размер его шрифта.
     if fonts.ctrl_wheel && ui.rect_contains_pointer(ui.max_rect()) {
-        let zoom = ui.input(|i| i.zoom_delta());
-        if zoom != 1.0 {
-            cmds.push(Cmd::FontZoom { console: false, step: if zoom > 1.0 { 1.0 } else { -1.0 } });
+        let step = super::ctrl_wheel_font_step(ui, id);
+        if step != 0.0 {
+            cmds.push(Cmd::FontZoom { console: false, step });
         }
     }
     ui.painter().rect_filled(ui.available_rect_before_wrap(), CornerRadius::ZERO, pal.editor_bg);
@@ -472,6 +474,45 @@ pub fn ui(ui: &mut Ui, doc: &mut Document, rel: &str, pal: &Palette, tab_id: u64
             }
         });
     });
+}
+
+/// Ставит текст каждой строки посередине её высоты.
+///
+/// Когда высота строки из настроек больше высоты шрифта, egui кладёт глифы к верху
+/// строки, и код «прилипает» к её верхней границе, а номер строки (он по центру) кажется
+/// съехавшим. Здесь глифы каждой строки сдвигаются вниз на половину лишней высоты.
+/// Прямоугольники строк не меняются, поэтому курсор, выделение и щелчки остаются точными.
+/// Сдвинутая раскладка запоминается и пересчитывается, только когда egui выдал новую.
+fn center_rows(ctx: &egui::Context, id: Id, galley: Arc<Galley>) -> Arc<Galley> {
+    let key = id.with("centered-galley");
+    if let Some((src, out)) = ctx.data(|d| d.get_temp::<(Arc<Galley>, Arc<Galley>)>(key))
+        && Arc::ptr_eq(&src, &galley)
+    {
+        return out;
+    }
+    let ppp = ctx.pixels_per_point();
+    let mut out = galley.clone();
+    let g = Arc::make_mut(&mut out);
+    let mut lowest = 0.0_f32;
+    for placed in &mut g.rows {
+        let Some(first) = placed.row.glyphs.first() else { continue };
+        let dy = ((first.line_height - first.font_height) * 0.5 * ppp).round() / ppp;
+        if dy <= 0.0 {
+            continue;
+        }
+        let row = Arc::make_mut(&mut placed.row);
+        for glyph in &mut row.glyphs {
+            glyph.pos.y += dy;
+        }
+        for v in &mut row.visuals.mesh.vertices {
+            v.pos.y += dy;
+        }
+        row.visuals.mesh_bounds = row.visuals.mesh_bounds.translate(vec2(0.0, dy));
+        lowest = lowest.max(dy);
+    }
+    g.mesh_bounds.max.y += lowest;
+    ctx.data_mut(|d| d.insert_temp(key, (galley, out.clone())));
+    out
 }
 
 /// Полоска под заголовком, пока подсказки Java не готовы: установка jdtls, запуск, импорт, ошибка.

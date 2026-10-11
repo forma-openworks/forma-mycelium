@@ -20,7 +20,7 @@ project-none-hint = Open the folder of a Gradle mod project — Fabric or NeoFor
 project-refresh = Reload files
 
 code-empty-title = No file open
-code-empty-hint = Double-click a file in the project tree or click a line of your mod in a stack trace.
+code-empty-hint = Click a file in the project tree or a line of your mod in a stack trace.
 code-cannot-open = The file can't be opened as text
 code-binary = This is a binary file.
 code-not-utf8 = The file isn't UTF-8.

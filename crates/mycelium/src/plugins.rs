@@ -2,7 +2,8 @@
 //!
 //! - jdtls — подсказки Java (ошибки, автодополнение, переход к определению);
 //! - kotlin-lsp — то же для Kotlin (появится позже);
-//! - Python — скрипты в духе Blender (появится вместе с плагином Python).
+//! - Python — скрипты в духе Blender (появится вместе с плагином Python);
+//! - Visual Studio Dark — тема, которую программа везёт в себе и ставит без сети.
 //!
 //! Плагины лежат в `%LOCALAPPDATA%\Forma\Mycelium\plugins`. jdtls первых версий стоял в
 //! `servers\jdtls` — при запуске он переносится в плагины, скачивать заново не нужно.
@@ -17,6 +18,9 @@ use crate::lsp::install;
 pub const JDTLS: &str = "jdtls";
 pub const KOTLIN_LSP: &str = "kotlin-lsp";
 pub const PYTHON: &str = "python";
+pub const VS_DARK: &str = "visual-studio-dark";
+/// id темы из плагина Visual Studio Dark (до плагинов она была встроенной).
+const VS_DARK_THEME: &str = "vs-dark";
 
 /// Папка плагинов.
 pub fn root() -> Option<PathBuf> {
@@ -39,6 +43,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
             source: Source::Download { url: install::JDTLS_URL },
             recommended: true,
             validate: Some(install::validate),
+            themes: None,
         },
         CatalogEntry {
             id: KOTLIN_LSP,
@@ -53,6 +58,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
             source: Source::Later,
             recommended: true,
             validate: None,
+            themes: None,
         },
         CatalogEntry {
             id: PYTHON,
@@ -67,6 +73,23 @@ pub fn catalog() -> Vec<CatalogEntry> {
             source: Source::Later,
             recommended: true,
             validate: None,
+            themes: None,
+        },
+        CatalogEntry {
+            id: VS_DARK,
+            name: t!("plugin-vs-dark-name"),
+            description: t!("plugin-vs-dark-about"),
+            kind: Kind::Themes,
+            size: None,
+            author: "FORMA",
+            license: "MIT",
+            homepage: "",
+            icon: "palette",
+            source: Source::Bundled { files: &[("themes/vs-dark.toml", include_str!("../plugins/visual-studio-dark/themes/vs-dark.toml"))] },
+            // Тема — не первая необходимость: на экране приветствия её не предлагаем.
+            recommended: false,
+            validate: None,
+            themes: Some("themes"),
         },
     ]
 }
@@ -75,9 +98,18 @@ pub fn entry(id: &str) -> Option<CatalogEntry> {
     catalog().into_iter().find(|e| e.id == id)
 }
 
-/// Плагины при запуске: jdtls из старого места переезжает в плагины.
-pub fn open() -> Plugins {
+/// Плагины при запуске: jdtls из старого места переезжает в плагины. `theme` — тема из
+/// настроек: Visual Studio Dark раньше была встроенной, и тем, кто её выбрал, плагин
+/// ставится сам, чтобы тема не пропала.
+pub fn open(theme: &str) -> Plugins {
     let mut plugins = Plugins::new(root());
+    if theme == VS_DARK_THEME
+        && plugins.get(VS_DARK).is_none()
+        && let Some(vs) = entry(VS_DARK)
+    {
+        plugins.install(&vs);
+        plugins.take_events();
+    }
     if let (Some(old), Some(jdtls)) = (crate::settings::cache_dir().map(|d| d.join("servers").join(JDTLS)), entry(JDTLS)) {
         match plugins.adopt(&jdtls, &old) {
             Ok(true) => log::info!("jdtls moved from {} to plugins", old.display()),

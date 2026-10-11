@@ -39,6 +39,8 @@ fn main() {
         viewport: egui::ViewportBuilder::default()
             .with_title(app::APP_TITLE)
             .with_app_id("forma-mycelium")
+            // Системной рамки нет: шапку с кнопками окна рисует сама программа.
+            .with_decorations(false)
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([800.0, 520.0])
             .with_icon(app::app_icon()),

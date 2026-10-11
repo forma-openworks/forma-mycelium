@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use eframe::egui::{self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Id, Key, Layout, Margin, RichText, Sense, Stroke, TextEdit, Ui, vec2};
+use eframe::egui::{self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Id, Key, Layout, Margin, Rect, RichText, Sense, Stroke, TextEdit, Ui, vec2};
 use forma_i18n::t;
 
 use super::run_configs::Outcome;
@@ -11,7 +11,7 @@ use super::{APP_TITLE, Cmd, Modal, MyceliumApp};
 use crate::actions;
 use crate::editors::EditorKind;
 use crate::icon::Logo;
-use forma_ui::theme::{self, Accent, Palette};
+use forma_ui::theme::{self, Origin, Palette};
 use forma_ui::widgets;
 use crate::workspace::Builtin;
 
@@ -33,7 +33,13 @@ impl MyceliumApp {
     pub(super) fn top_bar(&mut self, ui: &mut Ui) {
         let pal = self.pal.clone();
         let mark = icon_texture(ui.ctx(), &mut self.mark, Logo::Simple, 20.0, "mycelium-mark");
-        egui::Panel::top("mycelium-top").frame(Frame::new().fill(pal.menubar_bg).inner_margin(Margin::symmetric(8, 4))).show(ui, |ui| {
+        // Справа отступа нет: там вплотную к краю окна стоят кнопки окна (см. `caption`).
+        let frame = Frame::new().fill(pal.menubar_bg).inner_margin(Margin { left: 8, right: 0, top: 4, bottom: 4 });
+        let bar = egui::Panel::top("mycelium-top").frame(frame).show(ui, |ui| {
+            // Вся строка — заголовок окна: за пустое место окно перетаскивают.
+            let inner = ui.max_rect();
+            let whole = Rect::from_min_max(inner.min - vec2(8.0, 4.0), inner.max + vec2(0.0, 4.0));
+            super::caption::drag_area(ui, whole, Id::new("mycelium-caption"));
             let w = &mut ui.visuals_mut().widgets;
             w.inactive.fg_stroke.color = pal.menubar_text;
             w.hovered.fg_stroke.color = pal.menubar_text;
@@ -43,7 +49,7 @@ impl MyceliumApp {
                 // Место в строке делится по важности: значок и меню, кнопки запуска, текущее
                 // рабочее пространство, список конфигураций, остальные пространства. Что не
                 // поместилось — уходит в меню: пространства в «»», а меню программы в одно «☰».
-                let total = ui.available_width();
+                let total = ui.available_width() - super::caption::BUTTONS_W - 8.0;
                 let gap = ui.spacing().item_spacing.x;
                 let menus_w: f32 = menu_titles().iter().map(|t| widgets::button_width(ui, t, 0.0) + gap).sum();
                 let burger_w = forma_ui::icons::SIZE + 2.0 * ui.spacing().button_padding.x + gap;
@@ -56,6 +62,7 @@ impl MyceliumApp {
                 let left_w = logo_w + if compact { burger_w + 6.0 } else { menus_w + 18.0 } + tabs_min;
                 let combo = Some((total - left_w - run_w - 8.0).min(190.0)).filter(|w| *w >= 100.0);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(super::caption::BUTTONS_W + 8.0);
                     if self.project.is_some() {
                         ui.horizontal(|ui| {
                             crate::editors::console::run_bar(ui, &pal, &self.console, &self.configs, &mut self.view.run_config, combo, &mut self.cmds);
@@ -71,6 +78,7 @@ impl MyceliumApp {
                 });
             });
         });
+        self.caption_h = bar.response.rect.height();
     }
 
     /// Ширина кнопок запуска в верхней строке (без списка конфигураций).
@@ -93,7 +101,7 @@ impl MyceliumApp {
         if compact {
             widgets::top_menu_icon(ui, "menu", &t!("menu-compact"), false, |ui| {
                 ui.menu_button(t!("menu-file"), |ui| self.file_menu(ui, pal));
-                ui.menu_button(t!("menu-view"), |ui| self.view_menu(ui, pal));
+                ui.menu_button(t!("menu-view"), |ui| self.view_menu(ui));
                 ui.menu_button(t!("menu-run"), |ui| self.run_menu(ui, pal));
                 ui.menu_button(t!("menu-window"), |ui| self.window_menu(ui));
                 ui.menu_button(t!("menu-help"), |ui| self.help_menu(ui));
@@ -102,7 +110,7 @@ impl MyceliumApp {
         }
         widgets::top_menu(ui, &t!("menu-file"), false, |ui| self.file_menu(ui, pal));
         // «Вид» не закрывается от переключателей, чтобы можно было поменять сразу несколько.
-        widgets::top_menu(ui, &t!("menu-view"), true, |ui| self.view_menu(ui, pal));
+        widgets::top_menu(ui, &t!("menu-view"), true, |ui| self.view_menu(ui));
         widgets::top_menu(ui, &t!("menu-run"), false, |ui| self.run_menu(ui, pal));
         widgets::top_menu(ui, &t!("menu-window"), false, |ui| self.window_menu(ui));
         widgets::top_menu(ui, &t!("menu-help"), false, |ui| self.help_menu(ui));
@@ -150,11 +158,14 @@ impl MyceliumApp {
         }
     }
 
-    fn view_menu(&mut self, ui: &mut Ui, pal: &Palette) {
+    /// Меню «Вид»: тема и масштаб. Ползунков здесь нет — они живут в настройках.
+    fn view_menu(&mut self, ui: &mut Ui) {
         ui.menu_button(t!("settings-theme"), |ui| {
             let current = if self.settings.appearance.theme.is_empty() { crate::colors::DEFAULT_THEME.to_owned() } else { self.settings.appearance.theme.clone() };
             for th in self.themes.list() {
-                if ui.add(egui::Button::new(th.name.as_str()).selected(current == th.id)).clicked() {
+                // Встроенные темы помечены справа, как сочетание клавиш у пункта.
+                let tag = if th.origin == Origin::Builtin { t!("theme-default") } else { String::new() };
+                if ui.add(egui::Button::new(th.name.as_str()).shortcut_text(tag).selected(current == th.id)).clicked() {
                     self.settings.appearance.theme = th.id.clone();
                 }
             }
@@ -163,23 +174,6 @@ impl MyceliumApp {
                 self.cmds.push(Cmd::QuickSwitchTheme);
                 ui.close();
             }
-        });
-        ui.menu_button(t!("settings-accent"), |ui| {
-            if ui.add(egui::Button::new(t!("settings-accent-theme")).selected(self.settings.appearance.accent.is_none())).clicked() {
-                self.settings.appearance.accent = None;
-            }
-            for a in Accent::ALL {
-                let text = RichText::new(format!("●  {}", a.label())).color(a.color(pal.dark));
-                if ui.add(egui::Button::new(text).selected(self.settings.appearance.accent == Some(a))).clicked() {
-                    self.settings.appearance.accent = Some(a);
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.add_space(theme::MENU_PAD_X);
-            ui.label(t!("fonts-ui-size"));
-            ui.add(egui::Slider::new(&mut self.settings.fonts.ui.size, 11.0..=22.0).step_by(0.5).suffix(" px"));
-            ui.add_space(theme::MENU_PAD_X);
         });
         ui.separator();
         if ui.add(item(t!("action-zoom-in"), self.keys(actions::ZOOM_IN))).clicked() {
@@ -458,6 +452,9 @@ impl MyceliumApp {
         let pal = self.pal.clone();
         let logo = icon_texture(ui.ctx(), &mut self.logo, Logo::Detailed, 104.0, "mycelium-logo");
         egui::CentralPanel::default().frame(Frame::new().fill(pal.welcome_bg)).show(ui, |ui| {
+            // Строки меню здесь нет: заголовок окна — полоса вдоль верхнего края.
+            let strip = Rect::from_min_size(ui.max_rect().min, vec2(ui.max_rect().width(), super::caption::WELCOME_H));
+            super::caption::drag_area(ui, strip, Id::new("mycelium-caption-welcome"));
             // В низком окне экран приветствия компактнее (кнопки видны сразу) и прокручивается.
             let height = ui.available_height();
             let compact = height < 600.0;

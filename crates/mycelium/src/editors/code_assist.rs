@@ -225,8 +225,21 @@ fn segments(output: &TextEditOutput, from: usize, to: usize) -> Vec<Rect> {
     out
 }
 
-fn squiggle(painter: &egui::Painter, rect: Rect, color: Color32) {
-    let y = rect.bottom() - 1.5;
+/// Высота подчёркивания в отрезке `seg`: чуть ниже базовой линии текста. Строка бывает
+/// заметно выше шрифта, и у её нижнего края линия отрывалась бы от слова.
+fn underline_y(output: &TextEditOutput, seg: Rect) -> f32 {
+    let local = seg.center().y - output.galley_pos.y;
+    output
+        .galley
+        .rows
+        .iter()
+        .find(|r| local >= r.min_y() && local < r.max_y())
+        .and_then(|r| r.glyphs.first().map(|g| output.galley_pos.y + r.pos.y + g.pos.y + ((g.font_height - g.font_ascent) * 0.5).max(1.5)))
+        .map_or(seg.bottom() - 1.0, |y| y.min(seg.bottom() - 1.0))
+}
+
+/// Волнистая линия ошибки на высоте `y`.
+fn squiggle(painter: &egui::Painter, rect: Rect, y: f32, color: Color32) {
     let mut pts = Vec::new();
     let mut x = rect.left();
     let mut up = true;
@@ -262,10 +275,11 @@ pub fn paint_diagnostics(ui: &Ui, pal: &Palette, doc: &Document, lsp: &JavaLsp, 
             if !ui.clip_rect().intersects(seg) {
                 continue;
             }
+            let y = underline_y(output, seg);
             if d.severity <= Severity::Warning {
-                squiggle(&painter, seg, color);
+                squiggle(&painter, seg, y, color);
             } else {
-                painter.line_segment([seg.left_bottom(), seg.right_bottom()], Stroke::new(1.0, color.gamma_multiply(0.6)));
+                painter.line_segment([Pos2::new(seg.left(), y), Pos2::new(seg.right(), y)], Stroke::new(1.0, color.gamma_multiply(0.6)));
             }
             if pointer.is_some_and(|p| seg.expand2(vec2(1.0, 2.0)).contains(p)) && under.as_ref().is_none_or(|(s, _)| d.severity < *s) {
                 under = Some((d.severity, d.message.clone()));
@@ -416,7 +430,7 @@ pub fn ctrl_click(ui: &Ui, pal: &Palette, doc: &Document, lsp: &mut JavaLsp, out
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                 let painter = ui.painter().with_clip_rect(ui.clip_rect());
                 for s in segs {
-                    let y = s.bottom() - 1.0;
+                    let y = underline_y(output, s);
                     painter.extend(Shape::dashed_line(&[Pos2::new(s.left(), y), Pos2::new(s.right(), y)], Stroke::new(1.0, pal.editor_link), 3.0, 2.0));
                 }
             }

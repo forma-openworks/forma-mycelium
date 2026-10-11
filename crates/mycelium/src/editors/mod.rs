@@ -374,3 +374,37 @@ fn no_project(ui: &mut Ui, pal: &Palette, recent: &[PathBuf], cmds: &mut Vec<Cmd
         ui.add_space(12.0);
     });
 }
+
+/// На сколько пикселей меняется шрифт за один щелчок колёсика с Ctrl.
+const WHEEL_FONT_STEP: f32 = 0.5;
+/// Сколько точек плавной прокрутки (тачпад) считаются одним щелчком колёсика.
+const WHEEL_NOTCH_POINTS: f32 = 50.0;
+
+/// Ctrl+колёсико над редактором или консолью: на сколько пикселей поменять шрифт.
+///
+/// egui сам превращает Ctrl+колёсико в плавный масштаб, растянутый на много кадров, и
+/// один щелчок давал десятки шагов. Поэтому щелчки считаются по сырым событиям колёсика:
+/// щелчок — ровно одна ступень, а дробная прокрутка тачпада копится до целого щелчка.
+pub fn ctrl_wheel_font_step(ui: &Ui, id: Id) -> f32 {
+    let notches: f32 = ui.input(|i| {
+        i.events
+            .iter()
+            .map(|e| match e {
+                egui::Event::MouseWheel { unit, delta, modifiers, .. } if modifiers.command => match unit {
+                    egui::MouseWheelUnit::Line => delta.y,
+                    egui::MouseWheelUnit::Page => delta.y * 3.0,
+                    egui::MouseWheelUnit::Point => delta.y / WHEEL_NOTCH_POINTS,
+                },
+                _ => 0.0,
+            })
+            .sum()
+    });
+    if notches == 0.0 {
+        return 0.0;
+    }
+    let key = id.with("ctrl-wheel-rest");
+    let total = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0) + notches;
+    let whole = total.trunc();
+    ui.data_mut(|d| d.insert_temp(key, total - whole));
+    whole * WHEEL_FONT_STEP
+}

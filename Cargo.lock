@@ -2114,12 +2114,14 @@ dependencies = [
  "log",
  "mycelium-log",
  "mycelium-project",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",
  "syntect",
  "two-face",
  "wgpu",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -19,11 +19,11 @@ use forma_ui::plugins_page::{self, PluginsPage};
 use forma_ui::theme_tools;
 use forma_plugins::PluginSettings;
 use forma_ui::settings_window::{self as sw, Footer, PageInfo, SettingsWindow};
-use forma_ui::theme::Palette;
+use forma_ui::theme::{Origin, Palette};
 
 use super::{APP_TITLE, Cmd, Modal, MyceliumApp};
 use crate::actions;
-use crate::settings::{self, APP, Discord, Settings};
+use crate::settings::{APP, Discord, Settings};
 
 const DISCORD_PAGE: &str = "discord";
 /// Пункты «Найти действие», которые открывают страницу настроек.
@@ -153,20 +153,18 @@ impl MyceliumApp {
         let dirty = flags.iter().any(|(_, m)| *m);
         let modified = |id: &str| flags.iter().any(|(p, m)| p == id && *m);
         let max = ui.ctx().content_rect().size() - vec2(48.0, 48.0);
-        let locales = settings::user_locales_dir();
         let project_open = self.project.is_some();
-        let themes: Vec<ThemeOption> = self.themes.list().iter().map(|t| ThemeOption { id: t.id.clone(), name: t.name.clone() }).collect();
+        let themes: Vec<ThemeOption> = self.themes.list().iter().map(|t| ThemeOption { id: t.id.clone(), name: t.name.clone(), builtin: t.origin == Origin::Builtin }).collect();
         let mut theme_errors = self.theme.errors.clone();
         theme_errors.extend(self.themes.broken.iter().map(|(path, e)| format!("{}: {e}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())));
         let cx = PageContext {
-            locales_dir: locales.as_deref(),
             themes_dir: self.themes.dir(),
             themes: &themes,
             default_theme: crate::colors::DEFAULT_THEME,
             theme_errors: &theme_errors,
         };
         // Шрифты темы, выбранной в черновике: от неё зависит, какие поля заблокированы.
-        let draft_theme_fonts = self.themes.resolve(&d.draft.appearance.theme, crate::colors::DEFAULT_THEME, None).fonts;
+        let draft_theme_fonts = self.themes.resolve(&d.draft.appearance.theme, crate::colors::DEFAULT_THEME).fonts;
         let SettingsDialog { window, draft, keymap, fonts, plugins: plugins_ui, discord_secret } = d;
         let actions = &self.actions;
         let plugins = &self.plugins;
@@ -174,7 +172,7 @@ impl MyceliumApp {
         let mut plugin_actions = Vec::new();
         let mut appearance_action = None;
         // Тема, выбранная в черновике: её показывает инспектор и на её основе создаётся новая.
-        let draft_theme = self.themes.resolve(&d_theme_id(&draft.appearance.theme), crate::colors::DEFAULT_THEME, draft.appearance.accent);
+        let draft_theme = self.themes.resolve(&d_theme_id(&draft.appearance.theme), crate::colors::DEFAULT_THEME);
         let kit = theme_kit();
         let footer = window.show(ui, pal, max, &pages, &modified, dirty, &mut |ui, page, search| match page {
             appearance::PAGE => appearance_action = appearance::page(ui, pal, search, &mut draft.appearance, &cx).or(appearance_action),

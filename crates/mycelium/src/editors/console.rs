@@ -142,23 +142,27 @@ pub fn run_bar(ui: &mut Ui, _pal: &Palette, console: &Console, configs: &[RunCon
 }
 
 /// Выбор конфигурации запуска: значок вида, название и стрелка; в меню — все конфигурации
-/// (идущие помечены точкой) и «Изменить конфигурации…».
-fn config_picker(ui: &mut Ui, console: &Console, configs: &[RunConfig], selected: &mut Option<String>, current: Option<&RunConfig>, width: f32, cmds: &mut Vec<Cmd>) {
+/// (идущие помечены точкой) и «Изменить конфигурации…». Ширина — по содержимому, но не
+/// больше `max_width`: стрелка стоит сразу за названием, а длинное название обрезается.
+fn config_picker(ui: &mut Ui, console: &Console, configs: &[RunConfig], selected: &mut Option<String>, current: Option<&RunConfig>, max_width: f32, cmds: &mut Vec<Cmd>) {
+    let pad = ui.spacing().button_padding.x;
+    let label = current.map(|c| c.label()).unwrap_or_else(|| t!("run-no-configs"));
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let label_w = ui.painter().layout_no_wrap(label.clone(), font.clone(), egui::Color32::WHITE).size().x;
+    let icon_w = if current.is_some() { 20.0 } else { 0.0 };
+    let width = (pad + icon_w + label_w + 6.0 + 12.0 + pad + 1.0).min(max_width);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, ui.spacing().interact_size.y), Sense::click());
     let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
     let v = if open { ui.visuals().widgets.open } else { *ui.style().interact(&resp) };
     let painter = ui.painter();
     painter.rect(rect, v.corner_radius, v.weak_bg_fill, v.bg_stroke, egui::StrokeKind::Inside);
-    let pad = ui.spacing().button_padding.x;
     let mut x = rect.left() + pad;
     if let Some(c) = current {
         forma_ui::icons::paint(painter, egui::Rect::from_center_size(egui::pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0)), c.kind.icon(), v.fg_stroke.color);
         x += 20.0;
     }
     let arrow = egui::Rect::from_center_size(egui::pos2(rect.right() - pad - 6.0, rect.center().y), vec2(12.0, 12.0));
-    let label = current.map(|c| c.label()).unwrap_or_else(|| t!("run-no-configs"));
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let g = forma_ui::widgets::elide(ui, label, font, v.fg_stroke.color, arrow.left() - 4.0 - x);
+    let g = forma_ui::widgets::elide(ui, label, font, v.fg_stroke.color, arrow.left() - 6.0 - x);
     ui.painter().galley(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, v.fg_stroke.color);
     forma_ui::icons::paint(ui.painter(), arrow, "chevron-down", v.fg_stroke.color);
     egui::Popup::menu(&resp).style(forma_ui::theme::menu_style).show(|ui| {
@@ -415,9 +419,9 @@ pub fn ui(
         let slot = &fonts.console;
         let row_h = slot.row_height().max(14.0);
         if fonts.ctrl_wheel && ui.rect_contains_pointer(ui.max_rect()) {
-            let zoom = ui.input(|i| i.zoom_delta());
-            if zoom != 1.0 {
-                cmds.push(Cmd::FontZoom { console: true, step: if zoom > 1.0 { 1.0 } else { -1.0 } });
+            let step = super::ctrl_wheel_font_step(ui, ui.id());
+            if step != 0.0 {
+                cmds.push(Cmd::FontZoom { console: true, step });
             }
         }
         area.show_rows(ui, row_h, rows.len(), |ui, range| {
