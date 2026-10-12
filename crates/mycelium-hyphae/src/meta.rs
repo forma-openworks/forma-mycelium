@@ -35,6 +35,8 @@ pub struct ModMeta {
     /// Путь к логотипу внутри jar.
     pub logo: Option<String>,
     pub dependencies: Vec<ModDependency>,
+    /// Куда сообщать об ошибках (`issueTrackerURL`, `contact.issues`).
+    pub issues: Option<String>,
 }
 
 /// Что jar рассказывает о себе.
@@ -122,6 +124,7 @@ pub fn from_mods_toml(text: &str, format: Format, jar_version: Option<&str>, nes
         return JarMeta { format, mods, mixins: Vec::new(), nested };
     };
     let top_logo = doc.get("logoFile").and_then(|v| v.as_str()).map(str::to_owned);
+    let issues = doc.get("issueTrackerURL").and_then(|v| v.as_str()).map(str::trim).filter(|u| u.starts_with("http")).map(str::to_owned);
     let deps = doc.get("dependencies").and_then(|v| v.as_table());
     let mut mods = Vec::new();
     for m in doc.get("mods").and_then(|v| v.as_array()).into_iter().flatten() {
@@ -153,6 +156,7 @@ pub fn from_mods_toml(text: &str, format: Format, jar_version: Option<&str>, nes
             authors: toml_text(m.get("authors")),
             logo: m.get("logoFile").and_then(|v| v.as_str()).map(str::to_owned).or_else(|| top_logo.clone()),
             dependencies,
+            issues: issues.clone(),
         });
     }
     let mixins = doc
@@ -196,6 +200,11 @@ fn fabric_deps(v: Option<&Value>, required: bool) -> Vec<ModDependency> {
         .collect()
 }
 
+/// Адрес трекера задач — только настоящая ссылка.
+fn issue_url(v: Option<&Value>) -> Option<String> {
+    v.and_then(Value::as_str).map(str::trim).filter(|u| u.starts_with("http")).map(str::to_owned)
+}
+
 pub fn from_fabric(text: &str, nested: Vec<String>) -> Option<JarMeta> {
     let v: Value = serde_json::from_str(text).ok()?;
     let id = v.get("id")?.as_str()?.to_owned();
@@ -209,6 +218,7 @@ pub fn from_fabric(text: &str, nested: Vec<String>) -> Option<JarMeta> {
         authors: json_text(v.get("authors")),
         logo: fabric_icon(v.get("icon")),
         dependencies,
+        issues: issue_url(v.pointer("/contact/issues")),
     };
     let mixins = v
         .get("mixins")
@@ -248,6 +258,7 @@ pub fn from_quilt(text: &str, nested: Vec<String>) -> Option<JarMeta> {
         authors: meta.and_then(|m| m.get("contributors")).and_then(Value::as_object).map(|c| c.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default(),
         logo: fabric_icon(meta.and_then(|m| m.get("icon"))),
         dependencies,
+        issues: issue_url(meta.and_then(|m| m.pointer("/contact/issues"))),
     };
     let mixins = match v.get("mixin") {
         Some(Value::String(s)) => vec![s.clone()],
@@ -265,6 +276,7 @@ mod tests {
 modLoader = "javafml"
 loaderVersion = "[4,)"
 license = "LGPL-3.0 license"
+issueTrackerURL = "https://github.com/Layers-of-Railways/Railway/issues"
 
 [[mods]]
 modId = "railways"
@@ -299,6 +311,7 @@ versionRange = "[0,)"
         assert_eq!((r.id.as_str(), r.name.as_str()), ("railways", "Create: Steam 'n' Rails 1.21.1"));
         assert_eq!(r.version, "0.3.0-beta.2+neoforge-mc1.21.1", "версия из манифеста");
         assert_eq!(r.logo.as_deref(), Some("icon.png"));
+        assert_eq!(r.issues.as_deref(), Some("https://github.com/Layers-of-Railways/Railway/issues"));
         assert_eq!(m.mixins, vec!["railways-common.mixins.json", "railways.mixins.json"]);
         assert_eq!(r.dependencies.iter().map(|d| (d.id.as_str(), d.required)).collect::<Vec<_>>(), vec![("create", true), ("hexcasting", false)]);
     }
@@ -314,11 +327,12 @@ versionRange = "[0,)"
     fn fabric_metadata() {
         let text = r#"{"schemaVersion":1,"id":"sodium","version":"0.6.0","name":"Sodium","authors":["jellysquid3",{"name":"IMS"}],
             "icon":{"16":"a.png","128":"assets/sodium/icon.png"},"depends":{"minecraft":">=1.21"},"mixins":["sodium.mixins.json",{"config":"sodium-client.mixins.json"}],
-            "jars":[{"file":"META-INF/jars/lib.jar"}]}"#;
+            "jars":[{"file":"META-INF/jars/lib.jar"}],"contact":{"issues":"https://github.com/CaffeineMC/sodium/issues"}}"#;
         let m = from_fabric(text, Vec::new()).unwrap();
         assert_eq!(m.mods[0].authors, "jellysquid3, IMS");
         assert_eq!(m.mods[0].logo.as_deref(), Some("assets/sodium/icon.png"), "самый крупный значок");
         assert_eq!(m.mixins.len(), 2);
         assert_eq!(m.mods[0].dependencies[0].id, "minecraft");
+        assert_eq!(m.mods[0].issues.as_deref(), Some("https://github.com/CaffeineMC/sodium/issues"));
     }
 }

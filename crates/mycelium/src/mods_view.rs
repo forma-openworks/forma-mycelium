@@ -3,6 +3,7 @@
 //! и вкладка «Моды запуска» — так плашка мода везде одинаковая: «Create (create)» с логотипом.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use eframe::egui;
@@ -17,6 +18,8 @@ struct State {
     run: Option<Arc<RunMods>>,
     logos: HashMap<String, egui::TextureHandle>,
     rules: OriginRules,
+    /// Папки ресурсов своего мода (абсолютные) — по ним карточка проблемы находит файлы.
+    resource_dirs: Vec<PathBuf>,
 }
 
 fn state() -> &'static RwLock<State> {
@@ -34,6 +37,20 @@ pub fn set(run: Option<Arc<RunMods>>, logos: HashMap<String, egui::TextureHandle
 /// Правила происхождения открытого проекта (для разметки сообщений).
 pub fn set_rules(rules: &OriginRules) {
     state().write().unwrap_or_else(|e| e.into_inner()).rules = rules.clone();
+}
+
+/// Моды запуска, если они уже разобраны.
+pub fn run() -> Option<Arc<RunMods>> {
+    state().read().unwrap_or_else(|e| e.into_inner()).run.clone()
+}
+
+/// Папки ресурсов открытого проекта (пусто — проект закрыт).
+pub fn set_resource_dirs(dirs: Vec<PathBuf>) {
+    state().write().unwrap_or_else(|e| e.into_inner()).resource_dirs = dirs;
+}
+
+pub fn resource_dirs() -> Vec<PathBuf> {
+    state().read().unwrap_or_else(|e| e.into_inner()).resource_dirs.clone()
 }
 
 pub fn rules() -> OriginRules {
@@ -55,6 +72,12 @@ pub fn mod_id(origin: &Origin) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Название мода для людей, если оно не совпадает с id.
+pub fn mod_name(id: &str) -> Option<String> {
+    let s = state().read().unwrap_or_else(|e| e.into_inner());
+    s.run.as_ref().and_then(|r| r.get(id)).filter(|m| m.name != m.id).map(|m| m.name.clone())
 }
 
 /// Подпись мода: «Название (id)». Мода нет среди разобранных — просто id.

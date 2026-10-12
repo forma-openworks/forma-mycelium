@@ -22,8 +22,6 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 mycelium-project.workspace = true
 mycelium-log.workspace = true
 mycelium-hyphae.workspace = true
-# Разметка сообщений лога: id ресурсов, классы, файлы.
-regex = "1.11"
 eframe.workspace = true
 wgpu.workspace = true
 rfd.workspace = true

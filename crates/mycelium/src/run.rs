@@ -375,7 +375,14 @@ impl Session {
         }
         if !done.is_empty() {
             changed = true;
-            for e in done {
+            // Сторону знает запуск, а не строка лога.
+            let side = match self.config.kind {
+                RunKind::Client => Some(mycelium_log::RunSide::Client),
+                RunKind::Server => Some(mycelium_log::RunSide::Server),
+                _ => None,
+            };
+            for mut e in done {
+                e.run_side = side;
                 if e.crash {
                     self.crashed = true;
                 }

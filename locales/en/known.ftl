@@ -16,6 +16,7 @@ known-client-on-server-title = Client class on the server
 known-client-on-server-explain = Code that also runs on the server touched a class that exists only on the client (usually from net.minecraft.client). A dedicated server has no such classes, so the game crashes. Move client code into a separate class that is loaded only on the client (NeoForge: Dist.CLIENT, Fabric: ClientModInitializer).
 
 known-mixin-title = Mixin failed to apply
+known-mixin-headline = Mixin { $mixin } failed to apply to { $target }
 known-mixin-explain = A mixin couldn't be woven into its target: a method or field wasn't found, the signature didn't match, or the target changed in this game version. Check the method name and descriptor in @Inject and @At and that the mixin is listed in the mod's mixin config.
 
 known-registry-unbound-title = Registry object not registered yet
@@ -59,3 +60,7 @@ known-obj-file-explain = NeoForge couldn't find or read the .obj model or its .m
 
 known-invalid-path-title = Invalid file name in resources
 known-invalid-path-explain = A file in the mod's assets or data has a name that isn't a valid id: ids allow only lowercase Latin letters, digits and _ - . / (no capitals, no spaces). The game skips such files. Rename the file in lowercase, or remove it if it's a leftover (a .bbmodel, a TODO note).
+
+known-mixin-target-title = Mixin target not found
+known-mixin-target-headline = Mixin target { $target } was not found
+known-mixin-target-explain = The mixin names a class the game doesn't have. Usually the mod was made for another Minecraft version, where the class was called differently or lived in another package. If the mod isn't yours, update it or tell its author; if it's yours, fix the target in @Mixin.

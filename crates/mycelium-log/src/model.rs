@@ -196,10 +196,12 @@ pub enum Known {
     ObjFile,
     /// Файл в ресурсах мода назван не по правилам id — игра его пропускает.
     InvalidResourcePath,
+    /// Класс, который должен изменить mixin, не нашёлся (`@Mixin target … was not found`).
+    MixinTargetMissing,
 }
 
 impl Known {
-    pub const ALL: [Known; 20] = [
+    pub const ALL: [Known; 21] = [
         Known::MissingTexture,
         Known::MissingModel,
         Known::BlockstateError,
@@ -220,6 +222,7 @@ impl Known {
         Known::ObjMaterial,
         Known::ObjFile,
         Known::InvalidResourcePath,
+        Known::MixinTargetMissing,
     ];
 
     /// Ключ для перевода (`known-<ключ>-title`, `known-<ключ>-explain`).
@@ -245,6 +248,17 @@ impl Known {
             Known::ObjMaterial => "obj-material",
             Known::ObjFile => "obj-file",
             Known::InvalidResourcePath => "invalid-path",
+            Known::MixinTargetMissing => "mixin-target",
+        }
+    }
+
+    /// Поля, без которых нет заголовка с подробностями (`known-<ключ>-headline`):
+    /// «Mixin target KeyBindsList$KeyEntry was not found». Пусто — заголовок только общий.
+    pub fn headline_roles(self) -> &'static [Role] {
+        match self {
+            Known::MixinTargetMissing => &[Role::MixinTarget],
+            Known::MixinFailure => &[Role::Mixin, Role::MixinTarget],
+            _ => &[],
         }
     }
 
@@ -256,12 +270,115 @@ impl Known {
             Known::ClientClassOnServer | Known::MissingDependency | Known::DuplicateMod | Known::ModConstruction | Known::ClassMissing => {
                 System::ModLoading
             }
-            Known::MixinFailure => System::Mixin,
+            Known::MixinFailure | Known::MixinTargetMissing => System::Mixin,
             Known::DataParseError => System::Data,
             Known::NullPointer | Known::OutOfMemory | Known::ConcurrentModification => System::Game,
             Known::CompileError | Known::BuildFailed => System::Build,
         }
     }
+}
+
+/// Какая программа писала запись: клиент игры или выделенный сервер (`Dist` у NeoForge).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RunSide {
+    Client,
+    Server,
+}
+
+/// Чем занят поток, по его имени. Отсюда видна логическая сторона: `Server thread`
+/// внутри клиента — это встроенный сервер одиночной игры.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ThreadKind {
+    /// `main`: запуск игры до окна (здесь применяются mixin).
+    Startup,
+    /// `Render thread`: логический клиент — отрисовка и ввод.
+    Render,
+    /// `Server thread`: логический сервер — логика мира.
+    Server,
+    /// `Worker-Main-N`: фоновые задачи — ресурсы, чанки.
+    Worker,
+    /// `modloading-worker-N`: конструкторы модов и события загрузки.
+    ModLoading,
+    /// `Netty …`: сеть.
+    Network,
+    /// `IO-Worker-N`: чтение и запись на диск.
+    Io,
+}
+
+impl ThreadKind {
+    pub fn of(thread: &str) -> Option<ThreadKind> {
+        let t = thread.to_ascii_lowercase();
+        Some(match t.as_str() {
+            "main" => ThreadKind::Startup,
+            "render thread" => ThreadKind::Render,
+            "server thread" => ThreadKind::Server,
+            _ if t.starts_with("worker-main") => ThreadKind::Worker,
+            _ if t.starts_with("modloading-worker") => ThreadKind::ModLoading,
+            _ if t.starts_with("netty") => ThreadKind::Network,
+            _ if t.starts_with("io-worker") => ThreadKind::Io,
+            _ => return None,
+        })
+    }
+
+    /// Ключ для перевода (`thread-<ключ>-hint`).
+    pub fn key(self) -> &'static str {
+        match self {
+            ThreadKind::Startup => "startup",
+            ThreadKind::Render => "render",
+            ThreadKind::Server => "server",
+            ThreadKind::Worker => "worker",
+            ThreadKind::ModLoading => "mod-loading",
+            ThreadKind::Network => "network",
+            ThreadKind::Io => "io",
+        }
+    }
+}
+
+/// Что за сущность названа в тексте записи.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Role {
+    /// Класс Java: `net.minecraft.world.item.Item` (или через `/`, как в байткоде).
+    Class,
+    /// Класс, который должен был изменить mixin.
+    MixinTarget,
+    /// Конфигурация mixin: `railways-common.mixins.json`.
+    MixinConfig,
+    /// Класс mixin, как он записан в конфигурации — от её пакета: `client.MixinFoo`.
+    Mixin,
+    /// id мода: `railways`.
+    Mod,
+    /// id ресурса: `railways:block/bogey`.
+    Resource,
+    /// Путь к файлу: `models/block/bogey.json`.
+    File,
+}
+
+impl Role {
+    /// Имя аргумента в заголовках и ключ для перевода (`token-<ключ>`).
+    pub fn key(self) -> &'static str {
+        match self {
+            Role::Class => "class",
+            Role::MixinTarget => "target",
+            Role::MixinConfig => "config",
+            Role::Mixin => "mixin",
+            Role::Mod => "mod",
+            Role::Resource => "resource",
+            Role::File => "file",
+        }
+    }
+
+    /// Роль — класс (у таких значений есть пакет и короткое имя).
+    pub fn is_class(self) -> bool {
+        matches!(self, Role::Class | Role::MixinTarget | Role::Mixin)
+    }
+}
+
+/// Разобранная часть записи: что именно в ней названо (цель mixin, его конфигурация, мод…).
+/// Значение — как в тексте; где оно стоит в тексте, находит [`crate::tokens::tokens`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Field {
+    pub role: Role,
+    pub value: String,
 }
 
 /// Запись лога.
@@ -271,9 +388,14 @@ pub struct Entry {
     pub seq: u64,
     pub time: Option<String>,
     pub thread: Option<String>,
+    /// Клиент или сервер писал запись (знает запуск, а не строка лога).
+    pub run_side: Option<RunSide>,
     pub level: Level,
     pub logger: Option<String>,
     pub source: Source,
+    /// Строки лога перед сообщением, которые относятся к той же проблеме: Mixin сначала
+    /// пишет `Error loading class: X`, а следующей строкой — `@Mixin target X was not found`.
+    pub preceding: Vec<String>,
     /// Первая строка сообщения.
     pub message: String,
     /// Продолжение многострочного сообщения (без стек-трейса).
@@ -290,6 +412,8 @@ pub struct Entry {
     /// не нашёл Minecraft, а мод не загрузился у NeoForge.
     pub via: Option<Origin>,
     pub known: Option<Known>,
+    /// Что названо в записи: из них собираются заголовок и подсказки.
+    pub fields: Vec<Field>,
     /// Безобидный шум самого Minecraft или загрузчика в среде разработки: такие
     /// предупреждения есть у любого мода, и исправлять в своём коде нечего.
     pub noise: bool,
@@ -301,9 +425,11 @@ impl Entry {
             seq,
             time: None,
             thread: None,
+            run_side: None,
             level,
             logger: None,
             source,
+            preceding: Vec::new(),
             message: message.into(),
             details: Vec::new(),
             throwable: None,
@@ -313,8 +439,14 @@ impl Entry {
             origin: Origin::Unknown,
             via: None,
             known: None,
+            fields: Vec::new(),
             noise: false,
         }
+    }
+
+    /// Значение поля с этой ролью.
+    pub fn field(&self, role: Role) -> Option<&str> {
+        self.fields.iter().find(|f| f.role == role).map(|f| f.value.as_str())
     }
 
     /// Проблема ли это: предупреждение, ошибка, исключение или краш.
@@ -324,7 +456,12 @@ impl Entry {
 
     /// Весь текст записи одной строкой — для поиска.
     pub fn search_text(&self) -> String {
-        let mut s = self.message.clone();
+        let mut s = String::new();
+        for p in &self.preceding {
+            s.push_str(p);
+            s.push('\n');
+        }
+        s.push_str(&self.message);
         for d in &self.details {
             s.push('\n');
             s.push_str(d);

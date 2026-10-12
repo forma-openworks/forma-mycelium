@@ -101,6 +101,7 @@ toast-default-layout-failed = Не удалось сохранить станд�
 toast-default-layout-applied = Применена стандартная раскладка
 toast-default-layout-reset = Стандартная раскладка сброшена к заводской
 toast-file-missing = Файл не найден: { $path }
+toast-report-copied = Отчёт скопирован — вставьте его в открывшуюся задачу
 toast-source-missing = Исходник не найден: { $class }
 toast-no-sources = Нет исходников для { $class } ({ $jar })
 toast-sync-failed = Не удалось получить модель проекта от Gradle: { $error }

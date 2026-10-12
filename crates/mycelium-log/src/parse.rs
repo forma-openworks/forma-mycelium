@@ -40,6 +40,21 @@ static KOTLINC: LazyLock<Regex> = LazyLock::new(|| {
 static COUNT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+ (?:errors?|warnings?)$").expect("регулярное выражение"));
 static TASK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^> Task (?P<task>:\S+)(?: (?P<state>.+))?$").expect("регулярное выражение задачи"));
 
+/// `Error loading class: net/minecraft/Foo (java.lang.ClassNotFoundException: …)` от Mixin.
+static MIXIN_LOAD_ERROR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Error loading class: (\S+) \(").expect("регулярное выражение ошибки загрузки класса"));
+/// `@Mixin target net.minecraft.Foo was not found …`.
+static MIXIN_TARGET_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^@Mixin target (\S+) was not found").expect("регулярное выражение цели миксина"));
+
+/// Строка `msg` — продолжение записи `prev`: та не смогла загрузить класс, а эта говорит,
+/// что он был целью mixin.
+fn mixin_target_follows(prev: &Entry, msg: &str) -> bool {
+    if prev.throwable.is_some() || !prev.details.is_empty() || !prev.preceding.is_empty() || prev.source != Source::Game {
+        return false;
+    }
+    let (Some(a), Some(b)) = (MIXIN_LOAD_ERROR.captures(&prev.message), MIXIN_TARGET_LINE.captures(msg)) else { return false };
+    a[1].replace('/', ".") == b[1].replace('/', ".")
+}
+
 /// Служебные строки Gradle, которые не продолжают предыдущую запись.
 const GRADLE_PREFIXES: &[&str] = &[
     "> Configure project",
@@ -107,9 +122,18 @@ impl Parser {
         }
 
         if let Some(c) = HEADER.captures(line) {
-            self.finish_into(&mut done);
+            // `Error loading class: X` и сразу за ней `@Mixin target X was not found` — одна
+            // проблема: Mixin не смог загрузить цель, а потом сказал, чей mixin без неё остался.
+            let preceding = self.current.as_ref().filter(|prev| mixin_target_follows(prev, &c["msg"])).map(|prev| prev.message.clone());
+            if preceding.is_some() {
+                self.current = None;
+                self.mode = Mode::Normal;
+            } else {
+                self.finish_into(&mut done);
+            }
             let level = Level::parse(&c["level"]).unwrap_or(Level::Info);
             let mut e = self.entry(level, Source::Game, &c["msg"]);
+            e.preceding.extend(preceding);
             e.time = Some(c["time"].to_owned());
             e.thread = Some(c["thread"].to_owned());
             // В консоли NeoForge логгеры сокращены (`minecraft/Util`, `ne.ne.fm.ModLoader`) —
@@ -353,6 +377,25 @@ mod tests {
         }
         out.extend(p.finish());
         out
+    }
+
+    #[test]
+    fn mixin_load_error_joins_its_target_line() {
+        let log = "\
+[11Oct2026 13:24:35.547] [main/WARN] [mixin/]: Error loading class: net/minecraft/client/gui/screens/controls/KeyBindsList$KeyEntry (java.lang.ClassNotFoundException: net.minecraft.client.gui.screens.controls.KeyBindsList$KeyEntry)
+[11Oct2026 13:24:35.550] [main/WARN] [mixin/]: @Mixin target net.minecraft.client.gui.screens.controls.KeyBindsList$KeyEntry was not found railways-common.mixins.json:client.MixinKeyBindsListKeyEntry from mod railways
+[11Oct2026 13:24:35.659] [main/WARN] [mixin/]: Error loading class: org/jetbrains/annotations/ApiStatus$ScheduledForRemoval (java.lang.ClassNotFoundException: org.jetbrains.annotations.ApiStatus$ScheduledForRemoval)
+[11Oct2026 13:24:35.700] [main/WARN] [mixin/]: Error loading class: net/minecraft/Foo (java.lang.ClassNotFoundException: net.minecraft.Foo)
+[11Oct2026 13:24:35.701] [main/WARN] [mixin/]: @Mixin target net.minecraft.Bar was not found a.mixins.json:BarMixin from mod a";
+        let e = parse(log);
+        assert_eq!(e.len(), 4, "первые две строки — одна запись");
+        assert_eq!(e[0].preceding.len(), 1);
+        assert!(e[0].preceding[0].starts_with("Error loading class: net/minecraft/client"));
+        assert!(e[0].message.starts_with("@Mixin target"));
+        assert_eq!(e[0].known, Some(Known::MixinTargetMissing));
+        assert_eq!(e[0].origin, Origin::OtherMod(Some("railways".into())));
+        assert!(e[1].noise, "аннотации JetBrains во время игры не нужны");
+        assert!(e[2].preceding.is_empty() && e[3].preceding.is_empty(), "другой класс — не продолжение");
     }
 
     #[test]

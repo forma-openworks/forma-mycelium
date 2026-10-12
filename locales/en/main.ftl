@@ -99,6 +99,7 @@ toast-default-layout-failed = Couldn't save the default layout
 toast-default-layout-applied = Default layout applied
 toast-default-layout-reset = Default layout reset to factory
 toast-file-missing = File not found: { $path }
+toast-report-copied = Report copied — paste it into the issue that has just opened
 toast-source-missing = Source not found: { $class }
 toast-no-sources = No sources for { $class } ({ $jar })
 toast-sync-failed = Couldn't get the project model from Gradle: { $error }

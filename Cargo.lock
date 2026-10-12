@@ -2116,7 +2116,6 @@ dependencies = [
  "mycelium-log",
  "mycelium-project",
  "raw-window-handle",
- "regex",
  "rfd",
  "serde",
  "serde_json",

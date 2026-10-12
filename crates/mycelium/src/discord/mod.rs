@@ -25,6 +25,12 @@ use crate::run::RunKind;
 pub const CLIENT_ID: &str = "1558787805151367198";
 /// Публичные картинки для Discord.
 const ASSETS: &str = "https://raw.githubusercontent.com/forma-openworks/forma-mycelium/main/assets/discord";
+/// Те же картинки в программе — только ради отпечатка в ссылке (см. [`fingerprint`]).
+const ASSET_FILES: &[(&str, &[u8])] = &[
+    ("mycelium", include_bytes!("../../../../assets/discord/mycelium.png")),
+    ("neoforge", include_bytes!("../../../../assets/discord/neoforge.png")),
+    ("fabric", include_bytes!("../../../../assets/discord/fabric.png")),
+];
 const IDE_REPO: &str = "https://github.com/forma-openworks/forma-mycelium";
 /// Discord разрешает 5 обновлений за 20 секунд — обновляем не чаще раза в 4 секунды.
 const MIN_INTERVAL: Duration = Duration::from_secs(4);
@@ -42,6 +48,24 @@ pub struct Activity {
     pub small_image: Option<String>,
     pub small_text: Option<String>,
     pub buttons: Vec<(String, String)>,
+}
+
+/// Отпечаток содержимого картинки (FNV-1a). Discord запоминает внешнюю картинку по ссылке
+/// надолго, и новая картинка по старой ссылке так и не показывается. Отпечаток в `?v=`
+/// меняет ссылку вместе с картинкой.
+fn fingerprint(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{:08x}", h >> 32)
+}
+
+/// Ссылка на картинку из `assets/discord/` с отпечатком содержимого.
+fn asset_url(name: &str) -> String {
+    let bytes = ASSET_FILES.iter().find(|(n, _)| *n == name).map(|(_, b)| *b).unwrap_or_default();
+    format!("{ASSETS}/{name}.png?v={}", fingerprint(bytes))
 }
 
 /// Discord требует от 2 до 128 символов в строке.
@@ -207,7 +231,7 @@ pub fn status(input: &PresenceInput) -> String {
 
 /// Активность по состоянию IDE.
 pub fn activity(input: &PresenceInput) -> Activity {
-    let ide_icon = format!("{ASSETS}/mycelium.png");
+    let ide_icon = asset_url("mycelium");
     let Some(project) = input.project else {
         return Activity {
             details: "Forma Mycelium".into(),
@@ -258,7 +282,7 @@ pub fn activity(input: &PresenceInput) -> Activity {
         start: Some(input.started_unix),
         large_image,
         large_text,
-        small_image: loader.and_then(loader_badge).map(|badge| format!("{ASSETS}/{badge}.png")),
+        small_image: loader.and_then(loader_badge).map(asset_url),
         small_text,
         buttons,
     }
@@ -322,7 +346,11 @@ pub fn resolve_links(root: &Path, icon: Option<&Path>) -> ModLinks {
     let pushed = git(root, &["ls-tree", "--name-only", &format!("origin/{branch}"), "--", &rel]).is_some();
     let url = format!("https://raw.githubusercontent.com/{slug}/{branch}/{rel}");
     if pushed && is_public(&url) {
-        links.icon = Some(url);
+        // Отпечаток — по файлу на диске: после отправки новой иконки ссылка станет новой.
+        links.icon = Some(match std::fs::read(&abs) {
+            Ok(bytes) => format!("{url}?v={}", fingerprint(&bytes)),
+            Err(_) => url,
+        });
     }
     links
 }
@@ -330,6 +358,17 @@ pub fn resolve_links(root: &Path, icon: Option<&Path>) -> ModLinks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_links_change_with_the_image() {
+        assert_eq!(fingerprint(b"a"), fingerprint(b"a"));
+        assert_ne!(fingerprint(b"old logo"), fingerprint(b"new logo"), "новая картинка — новая ссылка, кеш Discord её не держит");
+        assert_eq!(fingerprint(b"").len(), 8);
+        for (name, bytes) in ASSET_FILES {
+            assert!(bytes.starts_with(b"\x89PNG"), "{name}.png");
+            assert!(asset_url(name).ends_with(&format!("{name}.png?v={}", fingerprint(bytes))));
+        }
+    }
 
     #[test]
     fn github_remotes() {
@@ -368,9 +407,9 @@ mod tests {
 
         let a = activity(&input);
         assert_eq!(a.details, "Mod: Test Mod (testmod)");
-        assert!(a.large_image.ends_with("/mycelium.png"), "без иконки мода — иконка IDE");
+        assert!(a.large_image.contains("/mycelium.png?v="), "без иконки мода — иконка IDE");
         assert_eq!(a.small_text.as_deref(), Some("NeoForge 21.1.252 · Minecraft 1.21.1"));
-        assert!(a.small_image.as_deref().is_some_and(|s| s.ends_with("/neoforge.png")));
+        assert!(a.small_image.as_deref().is_some_and(|s| s.contains("/neoforge.png?v=")));
 
         let links = ModLinks { icon: Some("https://raw.githubusercontent.com/holo/ruby/main/icon.png".into()), repo: Some("https://github.com/holo/ruby".into()) };
         input.links = Some(&links);
@@ -383,7 +422,7 @@ mod tests {
         input.secret = true;
         let a = activity(&input);
         assert!(!a.details.contains("Test Mod"));
-        assert!(a.large_image.ends_with("/mycelium.png"));
+        assert!(a.large_image.contains("/mycelium.png?v="));
         assert_eq!(a.buttons.len(), 1);
         let json = a.to_json();
         assert_eq!(json["timestamps"]["start"], 10);

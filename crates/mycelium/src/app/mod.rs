@@ -62,6 +62,12 @@ pub enum Cmd {
     OpenSource { class: String, file: Option<String>, line: Option<u32> },
     /// Открыть файл из jar библиотеки (`.class` — его исходник).
     OpenLibraryEntry { lib: usize, entry: String },
+    /// Открыть файл мода запуска: у своего — из ресурсов проекта, у чужого — из его jar.
+    OpenModFile { id: String, path: String },
+    /// Показать мод во вкладке «Моды запуска».
+    ShowMod(String),
+    /// Сообщить автору мода: скопировать готовый отчёт и открыть трекер задач.
+    ReportIssue { url: String, text: String },
     Reveal(PathBuf),
     /// Перечитать файлы проекта (загрузчик, версии, конфигурации запуска).
     Redetect,
@@ -437,6 +443,7 @@ impl MyceliumApp {
         self.run_mods = None;
         crate::mods_view::set(None, Default::default());
         crate::mods_view::set_rules(&project.rules);
+        crate::mods_view::set_resource_dirs(mycelium_hyphae::mods::own_resource_dirs(&project.root, &project.info));
         self.sync.on_open(&project, now);
         if project.model.is_none() {
             // Модели ещё нет — моды запуска пока только из `run/mods`.
@@ -469,6 +476,7 @@ impl MyceliumApp {
         self.run_mods = None;
         crate::mods_view::set(None, Default::default());
         crate::mods_view::set_rules(&Default::default());
+        crate::mods_view::set_resource_dirs(Vec::new());
         self.docs.clear();
         self.project = None;
         self.configs.clear();
@@ -642,6 +650,25 @@ impl MyceliumApp {
         }
     }
 
+    /// Файл мода запуска (конфигурация mixin и т. п.): у своего мода — из ресурсов проекта,
+    /// у чужого — из его jar (только чтение). Вложенный jar пока не открывается.
+    fn open_mod_file(&mut self, id: &str, path: &str, now: f64) {
+        let Some(m) = self.run_mods.as_ref().and_then(|r| r.get(id)).cloned() else { return };
+        if m.kind == mycelium_hyphae::ModKind::Own {
+            let Some(project) = &self.project else { return };
+            let found = mycelium_hyphae::mods::own_resource_dirs(&project.root, &project.info).into_iter().map(|d| d.join(path)).find(|p| p.is_file());
+            match found {
+                Some(file) => self.open_file(file, None, now),
+                None => self.toast(t!("toast-file-missing", path = path.to_owned()), true, now),
+            }
+            return;
+        }
+        match (m.jar, m.inner) {
+            (Some(jar), None) => self.open_jar(jar, path.to_owned(), None),
+            _ => self.toast(t!("toast-file-missing", path = path.to_owned()), true, now),
+        }
+    }
+
     /// Есть ли в текущем пространстве или отдельных окнах редактор такого вида.
     fn has_editor(&self, kind: EditorKind) -> bool {
         self.layout.workspaces[self.layout.active]
@@ -717,6 +744,16 @@ impl MyceliumApp {
                 Cmd::OpenFile { path, line } => self.open_file(path, line, now),
                 Cmd::OpenSource { class, file, line } => self.open_source(&class, file.as_deref(), line, now),
                 Cmd::OpenLibraryEntry { lib, entry } => self.open_library_entry(lib, &entry, now),
+                Cmd::OpenModFile { id, path } => self.open_mod_file(&id, &path, now),
+                Cmd::ReportIssue { url, text } => {
+                    ctx.copy_text(text);
+                    ctx.open_url(egui::OpenUrl::new_tab(url));
+                    self.toast(t!("toast-report-copied"), false, now);
+                }
+                Cmd::ShowMod(id) => {
+                    self.states.select_mod(&id);
+                    self.cmds.push(Cmd::OpenEditor(EditorKind::RunMods));
+                }
                 Cmd::Reveal(path) => reveal_in_explorer(&path),
                 Cmd::Redetect => {
                     if let Some(p) = &mut self.project {
@@ -725,6 +762,7 @@ impl MyceliumApp {
                             p.rules = p.rules.with_mods(run.map());
                         }
                         crate::mods_view::set_rules(&p.rules);
+                        crate::mods_view::set_resource_dirs(mycelium_hyphae::mods::own_resource_dirs(&p.root, &p.info));
                     }
                     self.refresh_configs();
                 }

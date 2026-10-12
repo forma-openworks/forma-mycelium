@@ -41,7 +41,10 @@ Hyphae collects everything that goes into the game:
 For every mod it records:
 - the id, display name, version, authors and description;
 - the logo, with fallbacks when the metadata points to a missing file;
-- required and optional dependencies, mixin configs, packages and resource namespaces.
+- required and optional dependencies, mixin configs, packages and resource namespaces;
+- where to report bugs: the issue tracker from the metadata.
+
+Every mixin config is read too: its package and which mixins apply on the client, on the server or on both. For your own mod the configs are found through the metadata in the resources, including the MDK template in `src/main/templates`.
 
 The Minecraft jar of ModDevGradle also carries NeoForge, so it is split into two entries. On a real project with Create, Flywheel, Ponder and Steam 'n' Rails, about 90 jars are read in 0.1–0.2 seconds.
 
@@ -74,6 +77,15 @@ The rules for the owner, in order:
 
 The plain-language explanation is based on the deepest cause in the chain. A wrapper such as "Unable to load model" only says where things broke. The root cause, such as "The material was not found in the library", says what broke.
 
+#### What a problem names
+
+A log entry also knows what it names. A mixin problem names the target class, the mixin config, the mixin and the mod. Any message can name classes, resource ids and files. From these come the title, such as *Mixin target KeyBindsList$KeyEntry was not found*, and tooltips built from facts:
+- a game class that doesn't exist in this version, and where a class with the same name lives now. In 1.21.1 `KeyBindsList` moved to `net.minecraft.client.gui.screens.options.controls`, and the tooltip says so;
+- the full name of a mixin and the side it applies on, from its config;
+- the mod, its version and where its config is declared.
+
+Mixin reports a missing target in two lines, `Error loading class: X` and then `@Mixin target X was not found`. They become one problem.
+
 ### Where you see it
 
 - **Mods of the run.** A tab in the Debug workspace lists your mod, Minecraft and the loader, other mods and libraries.
@@ -82,7 +94,8 @@ The plain-language explanation is based on the deepest cause in the chain. A wra
 - **The exceptions window and the console.**
   - Mod tags show the mod's name, id and logo. Your own mod's tag is lime; other mods share one color and are told apart by their logos.
   - Every problem shows its owner and, when they differ, the one it surfaced via.
-  - Messages are marked up: resource ids are colored by their owner, invalid characters in ids are highlighted, classes and files are picked out.
+  - Messages are colored by owner, and invalid characters in ids are highlighted. Every dotted token has a tooltip and opens on click: a class opens its source, a mixin config opens from the mod's jar, a mod opens in *Mods of the run*.
+  - The problem card offers the next step. For another mod's problem it copies a ready report and opens the mod's issue tracker. For your own it opens the place in your code or the resource file.
 
 ### Roadmap
 
@@ -110,8 +123,10 @@ Knowledge about Minecraft itself will live in data packs (TOML) per Minecraft an
 | `crates/mycelium-hyphae/src/jar.rs` | Reading jars: entries, manifest, module names, automatic module names |
 | `crates/mycelium-hyphae/src/meta.rs` | Mod metadata of every loader and the lists of nested jars |
 | `crates/mycelium-hyphae/src/mods.rs` | `RunMods`: the mods of the run and the ownership map |
+| `crates/mycelium-hyphae/src/mixin.rs` | Mixin configs: the package and the side of every mixin |
 | `crates/mycelium-project/src/origin.rs` | `OriginRules` and `ModMap`: origin of classes, modules, namespaces, mixin configs and loggers |
-| `crates/mycelium-log/src/classify.rs` | Owner, "surfaced via", game system and known problems of a log entry |
+| `crates/mycelium-log/src/classify.rs` | Owner, "surfaced via", game system, known problems and named fields of a log entry |
+| `crates/mycelium-log/src/tokens.rs` | Tokens of a message: classes, resource ids, files and the named fields |
 
 To print the mods of the run of any project, as Hyphae sees them:
 
@@ -160,7 +175,10 @@ Hyphae собирает всё, что попадает в игру:
 Для каждого мода записывается:
 - id, название, версия, авторы и описание;
 - логотип, с запасными вариантами, если метаданные ссылаются на несуществующий файл;
-- обязательные и необязательные зависимости, конфигурации миксинов, пакеты и пространства имён ресурсов.
+- обязательные и необязательные зависимости, конфигурации миксинов, пакеты и пространства имён ресурсов;
+- куда сообщать об ошибках: трекер задач из метаданных.
+
+Конфигурации миксинов тоже читаются: их пакет и какие миксины применяются на клиенте, на сервере или там и там. У своего мода конфигурации находятся через метаданные в ресурсах, в том числе в шаблоне MDK в `src/main/templates`.
 
 jar Minecraft у ModDevGradle несёт в себе и NeoForge, поэтому он делится на две записи. На настоящем проекте с Create, Flywheel, Ponder и Steam 'n' Rails около 90 jar читаются за 0.1–0.2 секунды.
 
@@ -193,6 +211,15 @@ jar Minecraft у ModDevGradle несёт в себе и NeoForge, поэтому
 
 Объяснение простыми словами строится по самой глубокой причине в цепочке. Обёртка вроде «Unable to load model» говорит только, где всё сломалось. Корневая причина, например «The material was not found in the library», говорит, что именно сломалось.
 
+#### Что названо в проблеме
+
+Запись лога знает и то, что в ней названо. Проблема миксина называет целевой класс, конфигурацию миксинов, сам миксин и мод. Любое сообщение может называть классы, id ресурсов и файлы. Из этого собираются заголовок, например *Mixin target KeyBindsList$KeyEntry was not found*, и подсказки из фактов:
+- класс игры, которого нет в этой версии, и где теперь лежит класс с тем же именем. В 1.21.1 `KeyBindsList` переехал в `net.minecraft.client.gui.screens.options.controls`, и подсказка об этом говорит;
+- полное имя миксина и сторона, на которой он применяется, — из его конфигурации;
+- мод, его версия и где подключена конфигурация.
+
+О ненайденной цели Mixin пишет двумя строками: `Error loading class: X`, а затем `@Mixin target X was not found`. Они становятся одной проблемой.
+
 ### Где это видно
 
 - **Моды запуска.** Вкладка в пространстве «Отладка» показывает свой мод, Minecraft и загрузчик, чужие моды и библиотеки.
@@ -201,7 +228,8 @@ jar Minecraft у ModDevGradle несёт в себе и NeoForge, поэтому
 - **Окно исключений и консоль.**
   - На плашках модов — название, id и логотип мода. Плашка своего мода салатовая, чужие — одного цвета, и их различают по логотипу.
   - У каждой проблемы показан владелец и, если отличается, тот, через кого она всплыла.
-  - Сообщения размечены: id ресурсов окрашены цветом владельца, недопустимые символы в id подсвечены, классы и файлы выделены.
+  - Сообщения окрашены по владельцу, недопустимые символы в id подсвечены. У каждого токена с пунктиром есть подсказка, и он открывается по щелчку: класс — исходником, конфигурация миксинов — из jar мода, мод — во вкладке *Моды запуска*.
+  - Карточка проблемы предлагает следующий шаг. У проблемы чужого мода она копирует готовый отчёт и открывает трекер задач мода. У своей — открывает место в коде или файл ресурса.
 
 ### Дальнейший план
 
@@ -229,8 +257,10 @@ jar Minecraft у ModDevGradle несёт в себе и NeoForge, поэтому
 | `crates/mycelium-hyphae/src/jar.rs` | Чтение jar: файлы, манифест, имена модулей, автоматические имена модулей |
 | `crates/mycelium-hyphae/src/meta.rs` | Метаданные модов всех загрузчиков и списки вложенных jar |
 | `crates/mycelium-hyphae/src/mods.rs` | `RunMods`: моды запуска и карта принадлежности |
+| `crates/mycelium-hyphae/src/mixin.rs` | Конфигурации миксинов: пакет и сторона каждого миксина |
 | `crates/mycelium-project/src/origin.rs` | `OriginRules` и `ModMap`: происхождение классов, модулей, пространств имён, конфигураций миксинов и логгеров |
-| `crates/mycelium-log/src/classify.rs` | Владелец, «через кого», система игры и известные проблемы записи лога |
+| `crates/mycelium-log/src/classify.rs` | Владелец, «через кого», система игры, известные проблемы и названное в записи лога |
+| `crates/mycelium-log/src/tokens.rs` | Токены сообщения: классы, id ресурсов, файлы и названные поля |
 
 Чтобы вывести моды запуска любого проекта так, как их видит Hyphae:
 

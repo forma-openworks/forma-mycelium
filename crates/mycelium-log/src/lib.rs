@@ -8,7 +8,9 @@ pub mod classify;
 pub mod collect;
 pub mod model;
 pub mod parse;
+pub mod tokens;
 
 pub use collect::{Problem, ProblemStore};
-pub use model::{Entry, Frame, Known, Level, Source, SourceLocation, System, Throwable};
+pub use model::{Entry, Field, Frame, Known, Level, Role, RunSide, Source, SourceLocation, System, ThreadKind, Throwable};
+pub use tokens::Token;
 pub use parse::Parser;

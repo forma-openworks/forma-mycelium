@@ -344,18 +344,13 @@ fn problem_row(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, selected: bool
 }
 
 fn details(ui: &mut Ui, pal: &Palette, p: &Problem, run: u32, libs: Option<&Libraries>, expanded: &mut HashSet<(u64, usize, usize)>, cmds: &mut Vec<Cmd>) {
-    ui.label(RichText::new(entry_title(&p.sample)).size(17.0).family(forma_ui::fonts::semibold()).color(pal.heading));
-    let mut facts = vec![t!("exceptions-count", count = p.count)];
-    if let (Some(first), Some(last)) = (&p.first_time, &p.last_time) {
-        let (first, last) = (super::console::short_time(first), super::console::short_time(last));
-        facts.push(if first == last { first } else { format!("{first} – {last}") });
-    }
-    if p.is_new(run) {
-        facts.push(t!("exceptions-new-in-run"));
+    let note = if p.is_new(run) {
+        Some(t!("exceptions-new-in-run"))
     } else if p.last_run < run {
-        facts.push(t!("exceptions-not-in-last-run"));
-    }
-    ui.label(RichText::new(facts.join(" · ")).size(12.0).color(pal.text_faint));
-    ui.add_space(8.0);
-    problem_ui::entry_details(ui, pal, &p.sample, libs, expanded, cmds);
+        Some(t!("exceptions-not-in-last-run"))
+    } else {
+        None
+    };
+    let repeats = super::problem_card::Repeats { count: p.count, first: p.first_time.clone(), last: p.last_time.clone(), note };
+    super::problem_card::card(ui, pal, &p.sample, Some(&repeats), libs, expanded, cmds);
 }

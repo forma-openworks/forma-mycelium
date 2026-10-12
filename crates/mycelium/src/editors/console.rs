@@ -9,7 +9,7 @@ use forma_i18n::t;
 use mycelium_log::{Entry, Level};
 use mycelium_project::Libraries;
 
-use super::problem_ui::{self, entry_title, level_color, level_tag, origin_color, system_label};
+use super::problem_ui::{entry_title, level_color, level_tag, origin_color, system_label};
 use crate::app::Cmd;
 use crate::run::{Console, RunConfig, Session, Status};
 use forma_ui::theme::Palette;
@@ -443,7 +443,7 @@ pub fn ui(
         egui::ScrollArea::vertical().id_salt("mycelium-console-details").auto_shrink(false).show(ui, |ui| {
             ui.add_space(6.0);
             egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
-                problem_ui::entry_details(ui, pal, e, libs, &mut view.expanded, cmds);
+                super::problem_card::card(ui, pal, e, None, libs, &mut view.expanded, cmds);
                 if e.is_problem() {
                     ui.add_space(6.0);
                     if ui.link(t!("console-show-in-exceptions")).clicked() {

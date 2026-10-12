@@ -5,9 +5,11 @@ pub mod code;
 mod code_assist;
 pub mod console;
 pub mod exceptions;
+pub mod problem_card;
 pub mod problem_ui;
 mod project;
 mod run_mods;
+mod token_text;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -168,6 +170,8 @@ pub struct EditorStates {
     run_mods: HashMap<u64, run_mods::RunModsView>,
     /// Проблема, которую надо выбрать в окне исключений (откроется и в новой вкладке).
     pending_problem: Option<String>,
+    /// Мод, который надо выбрать во вкладке «Моды запуска» (и в той, что ещё откроется).
+    pending_mod: Option<String>,
 }
 
 impl EditorStates {
@@ -177,6 +181,14 @@ impl EditorStates {
             view.select(signature);
         }
         self.pending_problem = Some(signature.to_owned());
+    }
+
+    /// Выбирает мод во всех вкладках «Моды запуска» — и в тех, что ещё откроются.
+    pub fn select_mod(&mut self, id: &str) {
+        for view in self.run_mods.values_mut() {
+            view.select(id);
+        }
+        self.pending_mod = Some(id.to_owned());
     }
 }
 
@@ -285,7 +297,11 @@ impl TabViewer for Editors<'_> {
                 exceptions::ui(ui, pal, view, self.console, libs, self.cmds);
             }
             EditorKind::RunMods => {
+                let pending = self.states.pending_mod.take();
                 let view = self.states.run_mods.entry(tab.id).or_default();
+                if let Some(id) = pending {
+                    view.select(&id);
+                }
                 run_mods::ui(ui, pal, view, self.run_mods, self.project.is_some(), self.console, self.sync, self.cmds);
             }
             kind => placeholder(ui, pal, kind),

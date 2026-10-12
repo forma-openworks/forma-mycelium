@@ -12,6 +12,7 @@ use mycelium_project::{Loader, ModInfo, ModMap, Origin};
 
 use crate::jar::{self, Jar};
 use crate::meta::{self, Format, ModDependency};
+use crate::mixin::MixinConfig;
 
 /// Как глубоко разбираем jar внутри jar.
 const MAX_NESTING: usize = 3;
@@ -62,9 +63,14 @@ pub struct RunMod {
     pub logo: Option<Arc<[u8]>>,
     pub description: String,
     pub authors: String,
+    /// Куда сообщать автору об ошибках.
+    pub issues: Option<String>,
     pub format: Option<Format>,
     pub dependencies: Vec<ModDependency>,
+    /// Имена конфигураций mixin из метаданных.
     pub mixins: Vec<String>,
+    /// Разобранные конфигурации mixin (те, что нашлись и прочитались).
+    pub mixin_configs: Vec<MixinConfig>,
     /// Имя модуля JPMS (если jar его задаёт).
     pub module: Option<String>,
     /// Пакеты с классами через точку (у первого мода jar).
@@ -86,9 +92,11 @@ impl RunMod {
             logo: None,
             description: String::new(),
             authors: String::new(),
+            issues: None,
             format: None,
             dependencies: Vec::new(),
             mixins: Vec::new(),
+            mixin_configs: Vec::new(),
             module: None,
             packages: Vec::new(),
             namespaces: Vec::new(),
@@ -154,6 +162,12 @@ impl RunMods {
 
     pub fn get(&self, id: &str) -> Option<&RunMod> {
         self.by_id.get(id).map(|&i| &self.mods[i])
+    }
+
+    /// Мод, которому принадлежит конфигурация mixin, и сама конфигурация (если прочиталась).
+    pub fn mixin_config(&self, name: &str) -> Option<(&RunMod, Option<&MixinConfig>)> {
+        let m = self.mods.iter().find(|m| m.mixins.iter().any(|c| c == name))?;
+        Some((m, m.mixin_configs.iter().find(|c| c.name == name)))
     }
 
     /// Пакеты и модули модов — для правил происхождения.
@@ -226,12 +240,14 @@ impl RunMods {
                 m.version = mm.version.clone();
                 m.description = mm.description.clone();
                 m.authors = mm.authors.clone();
+                m.issues = mm.issues.clone();
                 m.format = Some(meta.format);
                 m.dependencies = mm.dependencies.clone();
                 m.logo = find_logo(jar, &mm.id, mm.logo.as_deref());
                 place(&mut m);
                 if i == 0 {
                     m.mixins = meta.mixins.clone();
+                    m.mixin_configs = meta.mixins.iter().filter_map(|c| MixinConfig::parse(c, &jar.read_text(c)?)).collect();
                     m.module = module.clone();
                     m.packages = packages.clone();
                     m.namespaces = namespaces.clone();
@@ -370,14 +386,42 @@ fn find_logo(jar: &mut Jar, id: &str, declared: Option<&str>) -> Option<Arc<[u8]
     (bytes.len() <= MAX_LOGO).then(|| Arc::from(bytes))
 }
 
-/// Свой мод — из распознанного проекта.
+/// Свой мод — из распознанного проекта. Конфигурации mixin — из метаданных в ресурсах.
 fn own_mod(root: &Path, info: &ModInfo) -> Option<RunMod> {
     let id = info.mod_id.clone()?;
-    let mut m = RunMod::new(id.clone(), info.mod_name.clone().unwrap_or(id), ModKind::Own, Found::Project);
+    let mut m = RunMod::new(id.clone(), info.mod_name.clone().unwrap_or(id.clone()), ModKind::Own, Found::Project);
     m.version = info.mod_version.clone().unwrap_or_default();
     m.logo = info.icon.as_ref().and_then(|p| std::fs::read(root.join(p)).ok()).filter(|b| b.len() <= MAX_LOGO).map(Arc::from);
     m.packages = info.packages.clone();
+    let dirs = own_resource_dirs(root, info);
+    if let Some(meta) = own_meta(&dirs, &id) {
+        m.format = Some(meta.format);
+        m.mixin_configs = meta.mixins.iter().filter_map(|c| MixinConfig::parse(c, &dirs.iter().find_map(|d| std::fs::read_to_string(d.join(c)).ok())?)).collect();
+        m.mixins = meta.mixins;
+    }
     Some(m)
+}
+
+/// Папки ресурсов своего мода и шаблоны метаданных (`src/main/templates` у MDK NeoForge).
+pub fn own_resource_dirs(root: &Path, info: &ModInfo) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = info.resource_roots().map(|r| root.join(r)).collect();
+    dirs.extend(info.modules.iter().map(|m| root.join(&m.path).join("src/main/templates")).filter(|d| d.is_dir()));
+    dirs
+}
+
+/// Метаданные своего мода. В шаблоне MDK вместо id стоит `${mod_id}` — подставляем.
+fn own_meta(dirs: &[PathBuf], id: &str) -> Option<meta::JarMeta> {
+    let read = |name: &str| dirs.iter().find_map(|d| std::fs::read_to_string(d.join(name)).ok()).map(|t| t.replace("${mod_id}", id));
+    if let Some(t) = read("META-INF/neoforge.mods.toml") {
+        return Some(meta::from_mods_toml(&t, Format::NeoForge, None, Vec::new()));
+    }
+    if let Some(t) = read("META-INF/mods.toml") {
+        return Some(meta::from_mods_toml(&t, Format::Forge, None, Vec::new()));
+    }
+    if let Some(t) = read("fabric.mod.json") {
+        return meta::from_fabric(&t, Vec::new());
+    }
+    read("quilt.mod.json").and_then(|t| meta::from_quilt(&t, Vec::new()))
 }
 
 /// Папки `run/mods` корня и подпроектов (у мультилоадерных проектов они у каждого загрузчика свои).
@@ -428,6 +472,7 @@ mod tests {
             ("META-INF/jarjar/registrate.jar", &lib),
             ("META-INF/jarjar/ponder.jar", &ponder),
             ("icon.png", b"\x89PNG"),
+            ("create.mixins.json", br#"{"package":"com.simibubi.create.foundation.mixin","mixins":["MainMixin"],"client":["client.ScreenMixin"]}"#),
             ("assets/create/lang/en_us.json", b"{}"),
             ("data/quark/recipe/x.json", b"{}"),
             ("com/simibubi/create/Create.class", b""),
@@ -454,6 +499,11 @@ mod tests {
         assert_eq!((create.name.as_str(), create.version.as_str()), ("Create", "6.0.10"));
         assert_eq!(create.logo.as_deref(), Some(&b"\x89PNG"[..]));
         assert_eq!(create.mixins, vec!["create.mixins.json"]);
+        let (owner, config) = run.mixin_config("create.mixins.json").unwrap();
+        assert_eq!(owner.id, "create");
+        let config = config.unwrap();
+        assert_eq!(config.side_of("client.ScreenMixin"), Some(crate::mixin::MixinSide::Client));
+        assert_eq!(config.full_name("MainMixin"), "com.simibubi.create.foundation.mixin.MainMixin");
         assert_eq!(create.packages, vec!["com.simibubi.create", "com.simibubi.create.content"]);
         let ponder = run.get("ponder").unwrap();
         assert_eq!(ponder.found, Found::Nested { parent: "create".into() });
@@ -475,6 +525,26 @@ mod tests {
         assert!(!map.namespaces.contains_key("minecraft") || run.get("minecraft").is_none());
         assert_eq!(map.mixins.get("create.mixins.json"), Some(&Origin::OtherMod(Some("create".into()))));
         assert_eq!(map.abbreviated.get("co.si.cr.co").map(String::as_str), Some("com.simibubi.create.content"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn own_mixin_configs_come_from_the_mdk_template() {
+        let dir = temp("own");
+        let templates = dir.join("src/main/templates/META-INF");
+        std::fs::create_dir_all(&templates).unwrap();
+        std::fs::write(templates.join("neoforge.mods.toml"), "[[mods]]\nmodId=\"${mod_id}\"\nversion=\"${mod_version}\"\n[[mixins]]\nconfig=\"${mod_id}.mixins.json\"\n").unwrap();
+        let resources = dir.join("src/main/resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(resources.join("testmod.mixins.json"), r#"{"package":"com.holo.testmod.mixin","client":["ClientMixin"]}"#).unwrap();
+        let module = mycelium_project::detect::Module { path: PathBuf::new(), resource_roots: vec![PathBuf::from("src/main/resources")], ..Default::default() };
+        let info = ModInfo { mod_id: Some("testmod".into()), modules: vec![module], ..ModInfo::default() };
+        let run = RunMods::build(&RunInput { root: &dir, info: &info, classpath: &[] });
+        let own = run.get("testmod").unwrap();
+        assert_eq!(own.format, Some(Format::NeoForge));
+        assert_eq!(own.mixins, vec!["testmod.mixins.json"]);
+        assert_eq!(own.mixin_configs[0].full_name("ClientMixin"), "com.holo.testmod.mixin.ClientMixin");
+        assert_eq!(run.map().mixins.get("testmod.mixins.json"), Some(&Origin::OwnMod));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

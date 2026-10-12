@@ -192,6 +192,32 @@ impl Libraries {
         self.libs.iter().position(|l| l.entries.binary_search(&entry).is_ok()).map(|i| (i, entry))
     }
 
+    /// Есть ли сам класс — вложенный (`KeyBindsList$KeyEntry`) тоже, а не только внешний.
+    /// Имя — через точки или через `/`.
+    pub fn has_class(&self, fqcn: &str) -> bool {
+        let entry = format!("{}.class", fqcn.replace('.', "/"));
+        self.libs.iter().any(|l| l.entries.binary_search(&entry).is_ok())
+    }
+
+    /// Классы с тем же коротким именем в других пакетах — так видно, куда класс переехал
+    /// в этой версии игры (`…screens.controls.KeyBindsList` → `…screens.options.controls.KeyBindsList`).
+    pub fn classes_named(&self, fqcn: &str) -> Vec<String> {
+        let fqcn = fqcn.replace('/', ".");
+        let simple = fqcn.rsplit('.').next().unwrap_or(&fqcn);
+        let tail = format!("/{simple}.class");
+        let mut out: Vec<String> = self
+            .libs
+            .iter()
+            .flat_map(|l| l.entries.iter())
+            .filter(|e| e.ends_with(&tail))
+            .map(|e| e.trim_end_matches(".class").replace('/', "."))
+            .filter(|c| *c != fqcn)
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Исходник класса: jar с исходниками и путь внутри. `file` — имя файла из стек-трейса
     /// (`Item.java`); без него пробуем `.java` и `.kt` по имени внешнего класса.
     pub fn source_for(&self, lib: usize, class_entry: &str, file: Option<&str>) -> Option<(PathBuf, String)> {
@@ -520,6 +546,14 @@ mod tests {
         assert_eq!(read_entry(&src, &path).unwrap(), b"class Item {}");
         let (lib, entry) = libs.find_class("com.mojang.brigadier.Command").unwrap();
         assert!(libs.source_for(lib, &entry, Some("Command.java")).is_some());
+
+        // Вложенный класс есть, а класса из старого пакета нет — нашёлся тот же в новом.
+        assert!(libs.has_class("net.minecraft.world.item.Item$Properties"));
+        assert!(libs.has_class("net/minecraft/world/item/Item"));
+        assert!(!libs.has_class("net.minecraft.world.item.Item$Missing"));
+        assert!(!libs.has_class("net.minecraft.item.Item$Properties"));
+        assert_eq!(libs.classes_named("net.minecraft.item.Item$Properties"), vec!["net.minecraft.world.item.Item$Properties"]);
+        assert!(libs.classes_named("net.minecraft.world.item.Item").is_empty(), "сам класс — не «похожий»");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -25,6 +25,14 @@ pub struct RunModsView {
     selected: Option<String>,
 }
 
+impl RunModsView {
+    /// Выбирает мод; поиск сбрасывается, чтобы мод точно был виден в списке.
+    pub fn select(&mut self, id: &str) {
+        self.selected = Some(id.to_owned());
+        self.search.clear();
+    }
+}
+
 /// Обязательная зависимость мода, которой нет в запуске.
 struct Missing {
     owner: String,

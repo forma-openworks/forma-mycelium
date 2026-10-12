@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use mycelium_project::{Origin, OriginRules};
 use regex::Regex;
 
-use crate::model::{Entry, Known, Source, System, Throwable};
+use crate::model::{Entry, Field, Known, Role, Source, System, Throwable};
 
 /// Идентификатор ресурса `пространство:путь` (`testmod:item/ruby`).
 static RESOURCE_ID: LazyLock<Regex> =
@@ -22,6 +22,11 @@ pub fn classify(e: &mut Entry, rules: &OriginRules) {
         Some(system) if system != System::Game => system,
         _ => detect_system(e),
     };
+    // Поля миксина — и у записей других систем: NoClassDefFoundError из миксина и т. п.
+    let text = e.search_text();
+    if e.system == System::Mixin || text.to_ascii_lowercase().contains("mixin") {
+        e.fields = mixin_fields(&text);
+    }
     e.origin = detect_origin(e, rules);
     e.via = detect_via(e, rules).filter(|v| *v != e.origin);
     e.noise = e.known.is_none() && e.origin != Origin::OwnMod && is_noise(e);
@@ -51,6 +56,8 @@ const NOISE: &[&[&str]] = &[
     &["configuration file", "is not correct. correcting"],
     // Мелкие текстуры уменьшают число уровней mip-карт — так и задумано.
     &["limits mip level"],
+    // Mixin проверяет аннотации классов, а аннотаций JetBrains во время игры нет и не нужно.
+    &["error loading class: org/jetbrains/annotations/"],
 ];
 
 fn is_noise(e: &Entry) -> bool {
@@ -99,6 +106,9 @@ fn known_in(text: &str, types: &[&str]) -> Option<Known> {
     }
     if has(&["attempted to load class"]) && has(&["invalid dist"]) || has(&["in environment type server"]) {
         return Some(Known::ClientClassOnServer);
+    }
+    if has(&["@mixin target"]) && has(&["was not found"]) {
+        return Some(Known::MixinTargetMissing);
     }
     if has(&["mixin apply failed", "invalidinjectionexception", "critical injection failure", "mixintransformererror", "invalidmixinexception"]) {
         return Some(Known::MixinFailure);
@@ -237,17 +247,49 @@ fn system_by_frames(e: &Entry) -> Option<System> {
 
 /// «from mod railways» в тексте миксина.
 static FROM_MOD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"from mod ([a-z][a-z0-9_]*)").expect("регулярное выражение мода миксина"));
-/// Конфигурация миксинов: `railways-common.mixins.json`.
-static MIXIN_CONFIG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([a-z0-9_.-]+\.mixins\.json)").expect("регулярное выражение конфигурации миксинов"));
+/// Файл JSON — среди них ищутся конфигурации миксинов (`railways-common.mixins.json`,
+/// `mixins.foo.json`; в имени есть «mixin»).
+static JSON_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.json\b").expect("регулярное выражение файла JSON"));
+/// Mixin в конфигурации: `railways-common.mixins.json:client.MixinFoo`.
+static MIXIN_IN_CONFIG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\.json:([A-Za-z_$][\w.$]*)").expect("регулярное выражение миксина в конфигурации"));
+/// Цель миксина: `@Mixin target net.minecraft.Foo was not found` или
+/// `Mixin apply for mod x failed … -> net.minecraft.Foo: …`.
+static MIXIN_TARGET: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@Mixin target ([A-Za-z_$][\w.$/]*)|-> ([A-Za-z_$][\w.$/]*):").expect("регулярное выражение цели миксина"));
+
+/// Что названо в сообщении миксина: цель, конфигурация, сам mixin и мод.
+fn mixin_fields(text: &str) -> Vec<Field> {
+    let mut out = Vec::new();
+    let mut add = |role: Role, value: &str| {
+        // Точка в конце предложения — не часть имени.
+        let value = value.trim_end_matches('.');
+        if !value.is_empty() && !out.iter().any(|f: &Field| f.role == role) {
+            out.push(Field { role, value: value.to_owned() });
+        }
+    };
+    // `-> foo.mixins.json:MixinFoo` в цепочке фаз — это mixin, а не цель.
+    let target = MIXIN_TARGET.captures_iter(text).filter_map(|c| c.get(1).or(c.get(2))).find(|m| !m.as_str().ends_with(".json"));
+    if let Some(m) = target {
+        add(Role::MixinTarget, m.as_str());
+    }
+    if let Some(m) = JSON_FILE.find_iter(text).find(|m| m.as_str().to_ascii_lowercase().contains("mixin")) {
+        add(Role::MixinConfig, m.as_str());
+        if let Some(c) = MIXIN_IN_CONFIG.captures(&text[m.end() - ".json".len()..]) {
+            add(Role::Mixin, &c[1]);
+        }
+    }
+    if let Some(c) = FROM_MOD.captures(text) {
+        add(Role::Mod, &c[1]);
+    }
+    out
+}
 
 /// Владелец проблемы миксина: мод, названный в тексте, или хозяин конфигурации миксинов.
 fn mixin_owner(e: &Entry, rules: &OriginRules) -> Option<Origin> {
-    let text = e.search_text();
-    if let Some(c) = FROM_MOD.captures(&text) {
-        return Some(rules.namespace(&c[1]));
+    if let Some(id) = e.field(Role::Mod) {
+        return Some(rules.namespace(id));
     }
-    let config = MIXIN_CONFIG.captures(&text)?;
-    rules.mixin_config(&config[1])
+    rules.mixin_config(e.field(Role::MixinConfig)?)
 }
 
 /// Проблема ресурса или данных: её владелец — тот, чей это ресурс, а не код, который
@@ -517,9 +559,35 @@ mod tests {
         e.logger = Some("mixin".into());
         classify(&mut e, &rules());
         assert_eq!(e.origin, Origin::OtherMod(Some("railways".into())));
-        let mut e = entry("Mixin apply failed testmod.mixins.json:FooMixin -> net.minecraft.Foo");
+        assert_eq!(e.known, Some(Known::MixinTargetMissing));
+        assert_eq!(e.system, System::Mixin);
+        assert_eq!(e.field(Role::MixinTarget), Some("net.minecraft.client.gui.screens.controls.KeyBindsList$KeyEntry"));
+        assert_eq!(e.field(Role::MixinConfig), Some("railways-common.mixins.json"));
+        assert_eq!(e.field(Role::Mixin), Some("client.MixinKeyBindsListKeyEntry"));
+        assert_eq!(e.field(Role::Mod), Some("railways"));
+        let mut e = entry("Mixin apply failed testmod.mixins.json:FooMixin -> net.minecraft.Foo: boom");
         classify(&mut e, &rules());
         assert_eq!(e.origin, Origin::OwnMod);
+        assert_eq!(e.known, Some(Known::MixinFailure));
+        assert_eq!(e.field(Role::Mixin), Some("FooMixin"));
+        assert_eq!(e.field(Role::MixinTarget), Some("net.minecraft.Foo"));
+        assert_eq!(e.field(Role::Mod), None);
+    }
+
+    #[test]
+    fn mixin_phase_chains_do_not_pass_for_targets() {
+        let mut e = Entry::new(1, Level::Error, Source::Game, "Mixin apply for mod create failed");
+        let t = Throwable::new(
+            "org.spongepowered.asm.mixin.injection.throwables.InvalidInjectionException",
+            Some("Critical injection failure: @Inject annotation on tick could not find any targets matching 'tick' in net.minecraft.world.level.Level. [PREINJECT Applicator Phase -> mixins.create.json:LevelMixin from mod create -> Prepare Injections -> handler$zza000$tick()V -> Parse]".into()),
+        );
+        e.throwable = Some(t);
+        classify(&mut e, &rules());
+        assert_eq!(e.known, Some(Known::MixinFailure));
+        assert_eq!(e.field(Role::MixinTarget), None, "цепочка фаз — не цель");
+        assert_eq!(e.field(Role::MixinConfig), Some("mixins.create.json"), "имя конфигурации по-старому, с mixins. в начале");
+        assert_eq!(e.field(Role::Mixin), Some("LevelMixin"));
+        assert_eq!(e.origin, Origin::OtherMod(Some("create".into())));
     }
 
     #[test]

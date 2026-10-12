@@ -10,6 +10,8 @@
 
 pub mod jar;
 pub mod meta;
+pub mod mixin;
 pub mod mods;
 
+pub use mixin::{MixinConfig, MixinSide};
 pub use mods::{Found, ModKind, RunInput, RunMod, RunMods};
