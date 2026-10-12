@@ -1,3 +1,6 @@
+# The language's own name — shown in the settings.
+language-name = English
+
 ### Платформа Forma: окно настроек, внешний вид, раскладка клавиш,
 ### «Найти действие», экспорт и импорт настроек.
 
@@ -38,7 +41,7 @@ find-action-hint = Find an action or a setting…
 find-action-settings = Settings
 
 settings-export-title = Export settings
-settings-export-hint = Choose what goes into the archive. You can import it into Forma Mycelium on another computer or into another Forma app: it applies whatever it supports.
+settings-export-hint = Choose what goes into the archive. You can import it into { $app } on another computer or into another Forma app: it applies whatever it supports.
 settings-export-button = Export…
 dialog-export-settings = Save settings as
 toast-settings-exported = Settings saved to { $path }
@@ -126,3 +129,9 @@ theme-tokens-copy = Click to copy the line for a theme file
 settings-theme-create = Create theme…
 settings-theme-create-hint = A new theme file based on the selected theme, with every key listed and commented out
 settings-theme-open-folder = Open themes folder
+
+## Settings components (export and import)
+settings-component-appearance = Language, theme, zoom and background image
+settings-component-keymap = Your changes to the shortcuts
+settings-component-fonts = Interface, editor and console fonts
+settings-component-plugins = Which plugins are installed and which are turned off

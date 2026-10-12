@@ -9,6 +9,7 @@ use std::path::PathBuf;
 mod icon;
 
 fn main() {
+    forma_build::locales("../../locales", "LOCALES");
     println!("cargo:rerun-if-changed=src/icon.rs");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/logo");

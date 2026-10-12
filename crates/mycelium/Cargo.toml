@@ -40,6 +40,8 @@ raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [build-dependencies]
+# Строки программы вшиваются из locales/ в корне репозитория.
+forma-build.workspace = true
 embed-resource = "3.0.12"
 # Иконка .exe собирается из рисунков в assets/logo.
 image = { version = "0.25", default-features = false, features = ["webp"] }

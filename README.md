@@ -178,7 +178,7 @@ The defaults follow IntelliJ IDEA. Every one of them can be changed in **Setting
 
 ### Repository layout
 
-The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `mycelium-*` crates are everything specific to modding.
+The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `mycelium-*` crates are everything specific to modding. Forma: Holotype (notes and documentation, its own repository) is built on the same crates.
 
 | Path | Contents |
 |---|---|
@@ -194,8 +194,10 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 | `crates/mycelium/plugins/` | Plugins the app carries inside (the Visual Studio Dark theme) |
 | `crates/forma-actions` | Actions and the keymap |
 | `crates/forma-settings` | Settings components, their files, export and import |
-| `crates/forma-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks |
-| `locales/<lang>/*.ftl` | UI translations (`platform.ftl` holds the platform's strings) |
+| `crates/forma-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks; the platform's own strings in `locales/<lang>/` |
+| `crates/forma-shell` | The app shell shared by Forma apps: window frame, menus, workspaces, status bar, welcome screen, settings, Find Action, plugins and themes |
+| `crates/forma-build` | Build-script helpers: embedding `.ftl` translations and the Windows icon and version info |
+| `locales/<lang>/*.ftl` | Mycelium's UI translations |
 | `assets/logo/` | The logo: a detailed version for large sizes, a simple one for small icons |
 | `assets/discord/` | Images for Discord Rich Presence (sources and licenses in its README) |
 | `xtask` | Build tasks (`cargo xtask dist`, `cargo xtask discord-assets`) |
@@ -371,7 +373,7 @@ cargo test
 
 ### Устройство репозитория
 
-Крейты `forma-*` — платформа Forma, общая основа программ Forma. Крейты `mycelium-*` — всё, что относится к моддингу.
+Крейты `forma-*` — платформа Forma, общая основа программ Forma. Крейты `mycelium-*` — всё, что относится к моддингу. На тех же крейтах построена Forma: Holotype (заметки и документация, отдельный репозиторий).
 
 | Путь | Что внутри |
 |---|---|
@@ -387,8 +389,10 @@ cargo test
 | `crates/mycelium/plugins/` | Плагины, которые программа везёт в себе (тема Visual Studio Dark) |
 | `crates/forma-actions` | Действия и раскладка клавиш |
 | `crates/forma-settings` | Компоненты настроек, их файлы, экспорт и импорт |
-| `crates/forma-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов |
-| `locales/<язык>/*.ftl` | Переводы интерфейса (`platform.ftl` — строки платформы) |
+| `crates/forma-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов; строки самой платформы — в `locales/<язык>/` |
+| `crates/forma-shell` | Оболочка программ Forma: рамка окна, меню, рабочие пространства, строка состояния, экран приветствия, настройки, «Найти действие», плагины и темы |
+| `crates/forma-build` | Помощники сборочных скриптов: вшивание переводов `.ftl`, значка и сведений о версии для Windows |
+| `locales/<язык>/*.ftl` | Переводы интерфейса Mycelium |
 | `assets/logo/` | Логотип: подробный для больших размеров, упрощённый для маленьких значков |
 | `assets/discord/` | Картинки для активности в Discord (откуда они и лицензии — в README папки) |
 | `xtask` | Служебные задачи сборки (`cargo xtask dist`, `cargo xtask discord-assets`) |

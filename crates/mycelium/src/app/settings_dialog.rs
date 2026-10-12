@@ -256,7 +256,7 @@ impl MyceliumApp {
     pub(super) fn export_ui(&mut self, ui: &mut Ui, pal: &Palette, e: &mut ExportDialog, now: f64) -> bool {
         ui.set_width(super::chrome::modal_width(ui.ctx(), 460.0));
         title(ui, pal, &t!("settings-export-title"));
-        ui.add(egui::Label::new(RichText::new(t!("settings-export-hint")).size(12.5).color(pal.text_muted)).wrap());
+        ui.add(egui::Label::new(RichText::new(t!("settings-export-hint", app = APP_TITLE)).size(12.5).color(pal.text_muted)).wrap());
         ui.add_space(10.0);
         let infos = exportable();
         for (id, checked) in &mut e.checked {

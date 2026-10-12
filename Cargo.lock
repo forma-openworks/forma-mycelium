@@ -1401,11 +1401,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "forma-build"
+version = "0.1.0"
+dependencies = [
+ "embed-resource",
+]
+
+[[package]]
 name = "forma-i18n"
 version = "0.1.0"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
+ "forma-build",
  "log",
  "sys-locale",
  "unic-langid",
@@ -1442,6 +1450,31 @@ dependencies = [
  "serde",
  "serde_json",
  "zip",
+]
+
+[[package]]
+name = "forma-shell"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "env_logger",
+ "forma-actions",
+ "forma-build",
+ "forma-i18n",
+ "forma-layout",
+ "forma-plugins",
+ "forma-settings",
+ "forma-ui",
+ "image",
+ "log",
+ "raw-window-handle",
+ "rfd",
+ "serde",
+ "serde_json",
+ "syntect",
+ "two-face",
+ "wgpu",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2105,6 +2138,7 @@ dependencies = [
  "embed-resource",
  "env_logger",
  "forma-actions",
+ "forma-build",
  "forma-i18n",
  "forma-layout",
  "forma-plugins",

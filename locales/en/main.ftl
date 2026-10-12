@@ -1,6 +1,3 @@
-# The language's own name — shown in the settings.
-language-name = English
-
 ## Menus
 
 menu-file = File
@@ -116,8 +113,6 @@ settings-discord-secret-hint = Shows “a secret project” instead of the name,
 
 settings-page-discord = Discord
 settings-discord-secret-no-project = Open a project to hide its name.
-settings-component-appearance = Language, theme, accent color, text size, zoom
-settings-component-keymap = Your changes to the shortcuts
 settings-component-discord = Discord activity
 
 menu-manage-settings = Manage settings
@@ -142,8 +137,6 @@ action-group-view = View
 action-group-window = Window
 action-group-editor = Code editor
 action-group-help = Help
-settings-component-fonts = Interface, editor and console fonts
-settings-component-plugins = Which plugins are installed and which are turned off
 plugin-jdtls-name = Java language server (jdtls)
 plugin-jdtls-about = Errors right in the code, completion, hover docs and go to definition for Java, including Minecraft sources.
 plugin-kotlin-name = Kotlin language server

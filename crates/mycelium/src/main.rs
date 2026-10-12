@@ -7,6 +7,7 @@ mod colors;
 mod discord;
 mod editors;
 mod highlight;
+mod i18n;
 mod icon;
 mod lsp;
 mod mods_view;
@@ -27,7 +28,7 @@ fn main() {
 
     let mut store = forma_settings::Store::new(settings::config_dir());
     let settings = settings::Settings::load(&mut store);
-    forma_i18n::init(settings::user_locales_dir().as_deref());
+    i18n::init(settings::user_locales_dir().as_deref());
     forma_i18n::set_language(&settings.appearance.effective_language());
 
     // Разрешаем только Vulkan: весь интерфейс рисуется через Vulkan-бэкенд wgpu.

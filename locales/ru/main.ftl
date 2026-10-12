@@ -1,6 +1,3 @@
-# Самоназвание языка — показывается в настройках.
-language-name = Русский
-
 ## Меню
 
 menu-file = Файл
@@ -118,8 +115,6 @@ settings-discord-secret-hint = Вместо названия — «секрет�
 
 settings-page-discord = Discord
 settings-discord-secret-no-project = Откройте проект, чтобы скрыть его название.
-settings-component-appearance = Язык, тема, акцентный цвет, размер текста, масштаб
-settings-component-keymap = Ваши изменения сочетаний клавиш
 settings-component-discord = Активность в Discord
 
 menu-manage-settings = Управление настройками
@@ -144,8 +139,6 @@ action-group-view = Вид
 action-group-window = Окно
 action-group-editor = Редактор кода
 action-group-help = Справка
-settings-component-fonts = Шрифты интерфейса, редактора и консоли
-settings-component-plugins = Какие плагины установлены и какие выключены
 plugin-jdtls-name = Языковой сервер Java (jdtls)
 plugin-jdtls-about = Ошибки прямо в коде, автодополнение, описания при наведении и переход к определению для Java — и в исходниках Minecraft.
 plugin-kotlin-name = Языковой сервер Kotlin

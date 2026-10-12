@@ -93,6 +93,7 @@ mod tests {
 
     #[test]
     fn every_title_is_translated() {
+        crate::i18n::init(None);
         let r = registry();
         for lang in forma_i18n::builtin_languages() {
             for a in r.iter() {
