@@ -3,8 +3,9 @@
 
 use std::sync::{Arc, OnceLock, RwLock};
 
-/// Встроенные темы: тёмная по умолчанию идёт первой. Остальные темы — плагины.
-pub const BUILTIN_THEMES: &[&str] = &[include_str!("../themes/mycelium-dark.toml"), include_str!("../themes/mycelium-light.toml")];
+/// Встроенные темы — Mycelium Dark и Light из платформы: тёмная по умолчанию идёт первой.
+/// Остальные темы — плагины.
+pub const BUILTIN_THEMES: &[&str] = &forma_ui::theme::MYCELIUM_THEMES;
 
 /// Тема, если в настройках ничего не выбрано.
 pub const DEFAULT_THEME: &str = "mycelium-dark";

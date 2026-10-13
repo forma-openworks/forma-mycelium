@@ -108,7 +108,7 @@ The name comes from mycelium, the network that quietly connects everything aroun
 
 1. ✅ **Skeleton:** the composable UI, localization, the build.
 2. ✅ **Project and code:** `.mycelium`, the Gradle model, libraries by origin, runs, the smart console, the exceptions window, jdtls.
-3. 🔧 **Forma platform (in progress):**
+3. 🔧 **Forma Core, the shared core of Forma apps (in progress):**
    - ✅ settings grouped as in Rider, export and import;
    - ✅ a keymap and Find Action;
    - ✅ themes where everything can be restyled, three independent fonts, a background picture;
@@ -128,12 +128,15 @@ The name comes from mycelium, the network that quietly connects everything aroun
 - [Rust](https://www.rust-lang.org/) and [egui](https://github.com/emilk/egui), rendered through [wgpu](https://wgpu.rs/) on Vulkan. The UI is drawn by the app itself, with no web view.
 - [Fluent](https://projectfluent.org/) for localization.
 - [Eclipse JDT Language Server](https://github.com/eclipse-jdtls/eclipse.jdt.ls) for Java assistance.
-- [Lucide](https://lucide.dev) icons (ISC License, see `crates/forma-ui/icons/lucide/LICENSE`), drawn with [resvg](https://github.com/linebender/resvg).
+- [Lucide](https://lucide.dev) icons (ISC License, see `crates/forma-ui/icons/lucide/LICENSE` in Forma Core), drawn with [resvg](https://github.com/linebender/resvg).
 - Gradle init scripts for the project model. No Gradle plugin is added to your mod.
+- [Forma Core](https://github.com/forma-openworks/forma-core): the window shell, themes, settings, keymap, plugins and translations shared by Forma apps.
 
 ### Building
 
 You need stable Rust (edition 2024) and a GPU driver with Vulkan support. Development and testing currently happen on Windows.
+
+Cargo downloads the Forma Core crates from GitHub by itself.
 
 ```bash
 cargo run --release
@@ -178,7 +181,7 @@ The defaults follow IntelliJ IDEA. Every one of them can be changed in **Setting
 
 ### Repository layout
 
-The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `mycelium-*` crates are everything specific to modding. Forma: Holotype (notes and documentation, its own repository) is built on the same crates.
+The `mycelium-*` crates are everything specific to modding. The window, themes (including the built-in Mycelium Dark and Light), settings, keymap, plugins and translations come from [Forma Core](https://github.com/forma-openworks/forma-core), a separate repository with the `forma-*` crates. Forma: Holotype (notes and documentation) is built on the same core.
 
 | Path | Contents |
 |---|---|
@@ -186,17 +189,7 @@ The `forma-*` crates are the Forma platform, a base shared by Forma apps. The `m
 | `crates/mycelium-project` | The mod project: `.mycelium`, detection, the Gradle model, libraries, code origin |
 | `crates/mycelium-log` | Parsing and classifying game, Gradle and compiler logs |
 | `crates/mycelium-hyphae` | Hyphae, the knowledge engine: jars, mod metadata, nested jars, the mods of the run and who owns what |
-| `crates/forma-layout` | The composable UI: area tree, tabs, drag and drop, OS windows |
-| `crates/forma-ui` | The theme engine, icons, fonts, widgets, the settings window and its pages, Find Action, theme tools |
-| `crates/forma-ui/icons/lucide/` | The Lucide icons used by the app and their license |
-| `crates/forma-plugins` | Plugins: the manifest, installing, removing, turning on and off |
-| `crates/mycelium/themes/` | Built-in themes |
 | `crates/mycelium/plugins/` | Plugins the app carries inside (the Visual Studio Dark theme) |
-| `crates/forma-actions` | Actions and the keymap |
-| `crates/forma-settings` | Settings components, their files, export and import |
-| `crates/forma-i18n` | Localization: Fluent, the `t!` macro, translation completeness checks; the platform's own strings in `locales/<lang>/` |
-| `crates/forma-shell` | The app shell shared by Forma apps: window frame, menus, workspaces, status bar, welcome screen, settings, Find Action, plugins and themes |
-| `crates/forma-build` | Build-script helpers: embedding `.ftl` translations and the Windows icon and version info |
 | `locales/<lang>/*.ftl` | Mycelium's UI translations |
 | `assets/logo/` | The logo: a detailed version for large sizes, a simple one for small icons |
 | `assets/discord/` | Images for Discord Rich Presence (sources and licenses in its README) |
@@ -303,7 +296,7 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 
 1. ✅ **Каркас:** составной интерфейс, локализация, сборка.
 2. ✅ **Проект и код:** `.mycelium`, модель Gradle, библиотеки по происхождению, запуск, умная консоль, окно исключений, jdtls.
-3. 🔧 **Платформа Forma (идёт сейчас):**
+3. 🔧 **Forma Core, общее ядро программ Forma (идёт сейчас):**
    - ✅ настройки по группам как в Rider, экспорт и импорт;
    - ✅ раскладка клавиш и «Найти действие»;
    - ✅ темы, где перекрашивается всё, три независимых шрифта, фоновая картинка;
@@ -323,12 +316,15 @@ Forma Mycelium — среда разработки в духе IntelliJ IDEA и 
 - [Rust](https://www.rust-lang.org/) и [egui](https://github.com/emilk/egui), отрисовка через [wgpu](https://wgpu.rs/) на Vulkan. Интерфейс программа рисует сама, без веб-движка.
 - [Fluent](https://projectfluent.org/) для локализации.
 - [Eclipse JDT Language Server](https://github.com/eclipse-jdtls/eclipse.jdt.ls) для подсказок Java.
-- Значки [Lucide](https://lucide.dev) (лицензия ISC, см. `crates/forma-ui/icons/lucide/LICENSE`), рисуются с помощью [resvg](https://github.com/linebender/resvg).
+- Значки [Lucide](https://lucide.dev) (лицензия ISC, см. `crates/forma-ui/icons/lucide/LICENSE` в Forma Core), рисуются с помощью [resvg](https://github.com/linebender/resvg).
 - Init-скрипты Gradle для модели проекта. Никаких плагинов Gradle в мод не добавляется.
+- [Forma Core](https://github.com/forma-openworks/forma-core): оболочка окна, темы, настройки, раскладка клавиш, плагины и переводы, общие для программ Forma.
 
 ### Сборка
 
 Нужны стабильный Rust (edition 2024) и драйвер видеокарты с поддержкой Vulkan. Разработка и проверка сейчас идут на Windows.
+
+Крейты Forma Core Cargo скачивает с GitHub сам.
 
 ```bash
 cargo run --release
@@ -373,7 +369,7 @@ cargo test
 
 ### Устройство репозитория
 
-Крейты `forma-*` — платформа Forma, общая основа программ Forma. Крейты `mycelium-*` — всё, что относится к моддингу. На тех же крейтах построена Forma: Holotype (заметки и документация, отдельный репозиторий).
+Крейты `mycelium-*` — всё, что относится к моддингу. Окно, темы (и встроенные Mycelium Dark и Light), настройки, раскладка клавиш, плагины и переводы приходят из [Forma Core](https://github.com/forma-openworks/forma-core) — отдельного репозитория с крейтами `forma-*`. На том же ядре построена Forma: Holotype (заметки и документация).
 
 | Путь | Что внутри |
 |---|---|
@@ -381,17 +377,7 @@ cargo test
 | `crates/mycelium-project` | Проект мода: `.mycelium`, распознавание, модель Gradle, библиотеки, происхождение кода |
 | `crates/mycelium-log` | Разбор и классификация логов игры, Gradle и компиляторов |
 | `crates/mycelium-hyphae` | Hyphae, движок знаний: jar, метаданные модов, вложенные jar, моды запуска и кому что принадлежит |
-| `crates/forma-layout` | Составной интерфейс: дерево областей, вкладки, перетаскивание, окна ОС |
-| `crates/forma-ui` | Движок тем, значки, шрифты, виджеты, окно настроек и его страницы, «Найти действие», инструменты для тем |
-| `crates/forma-ui/icons/lucide/` | Значки Lucide, которые использует программа, и их лицензия |
-| `crates/forma-plugins` | Плагины: описание, установка, удаление, включение и выключение |
-| `crates/mycelium/themes/` | Встроенные темы |
 | `crates/mycelium/plugins/` | Плагины, которые программа везёт в себе (тема Visual Studio Dark) |
-| `crates/forma-actions` | Действия и раскладка клавиш |
-| `crates/forma-settings` | Компоненты настроек, их файлы, экспорт и импорт |
-| `crates/forma-i18n` | Локализация: Fluent, макрос `t!`, проверка полноты переводов; строки самой платформы — в `locales/<язык>/` |
-| `crates/forma-shell` | Оболочка программ Forma: рамка окна, меню, рабочие пространства, строка состояния, экран приветствия, настройки, «Найти действие», плагины и темы |
-| `crates/forma-build` | Помощники сборочных скриптов: вшивание переводов `.ftl`, значка и сведений о версии для Windows |
 | `locales/<язык>/*.ftl` | Переводы интерфейса Mycelium |
 | `assets/logo/` | Логотип: подробный для больших размеров, упрощённый для маленьких значков |
 | `assets/discord/` | Картинки для активности в Discord (откуда они и лицензии — в README папки) |
